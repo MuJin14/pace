@@ -42,6 +42,13 @@ Java 17, Spring Boot 3.2, MySQL 8, Redis 7, MyBatis-Plus, Spring Security + JWT,
 - 核心表：`user`、`activity`（运动记录，轨迹以 JSON 存储）、`friendship`、`message`（详见 runApp_frame.txt 第五章）
 - GPS 轨迹：滑动平均平滑 + 道格拉斯-普克抽稀；防作弊需地理围栏、随机打卡点、速度/步频校验
 
+## 排行榜规范（后续阶段用）
+- 支持日榜、周榜、滚动30天榜、自然月榜
+- 不使用 Redis，排行榜数据完全基于 MySQL 的 leaderboard_stats 表实现
+- 实时更新用 INSERT ... ON DUPLICATE KEY UPDATE
+- 凌晨用定时任务重算滚动30天榜并清理过期数据
+- 查询直接走 SQL ORDER BY + LIMIT
+
 ## 代码规范
 
 - Controller 不写业务逻辑

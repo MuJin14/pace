@@ -14,14 +14,5 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
 
-  redis:
-    image: redis:7
-    container_name: campus-run-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-
 volumes:
   mysql-data:
-  redis-data:
