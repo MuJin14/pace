@@ -1,8 +1,11 @@
 package com.campusrun.server.controller;
 
+import com.campusrun.common.exception.BusinessException;
 import com.campusrun.common.exception.GlobalExceptionHandler;
+import com.campusrun.common.result.ErrorCode;
 import com.campusrun.server.config.JwtProperties;
 import com.campusrun.server.config.SecurityConfig;
+import com.campusrun.server.dto.response.FenceResponse;
 import com.campusrun.server.exception.SecurityExceptionHandler;
 import com.campusrun.server.security.JwtAuthenticationFilter;
 import com.campusrun.server.security.JwtTokenProvider;
@@ -14,12 +17,18 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -56,6 +65,20 @@ class FenceControllerTest {
         return jwtTokenProvider.generateToken(1L, "CR-00001234", 1);
     }
 
+    private FenceResponse fenceResponse() {
+        FenceResponse response = new FenceResponse();
+        response.setId(1L);
+        response.setName("操场");
+        response.setEnabled(1);
+        return response;
+    }
+
+    private String fenceBody() {
+        return "{\"name\":\"操场\",\"centerLat\":39.9,\"centerLng\":116.4,\"radiusMeters\":100}";
+    }
+
+    // ---- list ----
+
     @Test
     void list_withoutToken_returns401() throws Exception {
         mockMvc.perform(get("/api/v1/admin/fences"))
@@ -76,6 +99,150 @@ class FenceControllerTest {
         when(fenceService.list()).thenReturn(List.of());
 
         mockMvc.perform(get("/api/v1/admin/fences")
+                        .header("Authorization", "Bearer " + adminToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+    }
+
+    // ---- get ----
+
+    @Test
+    void get_withoutToken_returns401() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/fences/1"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    void get_withUserToken_returns403() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/fences/1")
+                        .header("Authorization", "Bearer " + userToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(403));
+    }
+
+    @Test
+    void get_withAdminToken_returns200() throws Exception {
+        when(fenceService.get(1L)).thenReturn(fenceResponse());
+
+        mockMvc.perform(get("/api/v1/admin/fences/1")
+                        .header("Authorization", "Bearer " + adminToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value(1))
+                .andExpect(jsonPath("$.data.name").value("操场"));
+    }
+
+    @Test
+    void get_notFound_returnsFenceNotFound() throws Exception {
+        when(fenceService.get(1L)).thenThrow(new BusinessException(ErrorCode.FENCE_NOT_FOUND));
+
+        mockMvc.perform(get("/api/v1/admin/fences/1")
+                        .header("Authorization", "Bearer " + adminToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(5001));
+    }
+
+    // ---- create ----
+
+    @Test
+    void create_withoutToken_returns401() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/fences")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fenceBody()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    void create_withUserToken_returns403() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/fences")
+                        .header("Authorization", "Bearer " + userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fenceBody()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(403));
+    }
+
+    @Test
+    void create_withAdminToken_returns200() throws Exception {
+        when(fenceService.create(any())).thenReturn(fenceResponse());
+
+        mockMvc.perform(post("/api/v1/admin/fences")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fenceBody()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value(1));
+    }
+
+    @Test
+    void create_invalidLat_returnsParamError() throws Exception {
+        String invalid = "{\"name\":\"操场\",\"centerLat\":999.0,\"centerLng\":116.4,\"radiusMeters\":100}";
+
+        mockMvc.perform(post("/api/v1/admin/fences")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalid))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    // ---- update ----
+
+    @Test
+    void update_withoutToken_returns401() throws Exception {
+        mockMvc.perform(put("/api/v1/admin/fences/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fenceBody()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    void update_withUserToken_returns403() throws Exception {
+        mockMvc.perform(put("/api/v1/admin/fences/1")
+                        .header("Authorization", "Bearer " + userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fenceBody()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(403));
+    }
+
+    @Test
+    void update_withAdminToken_returns200() throws Exception {
+        when(fenceService.update(eq(1L), any())).thenReturn(fenceResponse());
+
+        mockMvc.perform(put("/api/v1/admin/fences/1")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fenceBody()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value(1));
+    }
+
+    // ---- disable ----
+
+    @Test
+    void disable_withoutToken_returns401() throws Exception {
+        mockMvc.perform(delete("/api/v1/admin/fences/1"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    void disable_withUserToken_returns403() throws Exception {
+        mockMvc.perform(delete("/api/v1/admin/fences/1")
+                        .header("Authorization", "Bearer " + userToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(403));
+    }
+
+    @Test
+    void disable_withAdminToken_returns200() throws Exception {
+        mockMvc.perform(delete("/api/v1/admin/fences/1")
                         .header("Authorization", "Bearer " + adminToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
