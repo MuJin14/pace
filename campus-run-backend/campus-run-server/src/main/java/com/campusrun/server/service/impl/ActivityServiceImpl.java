@@ -12,13 +12,19 @@ import com.campusrun.server.dto.response.ActivityDetailResponse;
 import com.campusrun.server.dto.response.ActivitySummaryResponse;
 import com.campusrun.server.entity.Activity;
 import com.campusrun.server.mapper.ActivityMapper;
+import com.campusrun.server.model.FenceMatchResult;
 import com.campusrun.server.model.TrackPoint;
 import com.campusrun.server.service.ActivityService;
+import com.campusrun.server.service.BadgeService;
+import com.campusrun.server.service.FenceService;
+import com.campusrun.server.service.GoalService;
 import com.campusrun.server.service.LeaderboardService;
 import com.campusrun.server.util.GpsUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +39,7 @@ import java.util.List;
 @Service
 public class ActivityServiceImpl implements ActivityService {
 
+    private static final Logger log = LoggerFactory.getLogger(ActivityServiceImpl.class);
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final int MAX_RUNNING_POINTS = 5000;
     private static final int MAX_CYCLING_POINTS = 15000;
@@ -40,12 +47,19 @@ public class ActivityServiceImpl implements ActivityService {
     private final ActivityMapper activityMapper;
     private final ObjectMapper objectMapper;
     private final LeaderboardService leaderboardService;
+    private final FenceService fenceService;
+    private final GoalService goalService;
+    private final BadgeService badgeService;
 
     public ActivityServiceImpl(ActivityMapper activityMapper, ObjectMapper objectMapper,
-                               LeaderboardService leaderboardService) {
+                               LeaderboardService leaderboardService, FenceService fenceService,
+                               GoalService goalService, BadgeService badgeService) {
         this.activityMapper = activityMapper;
         this.objectMapper = objectMapper;
         this.leaderboardService = leaderboardService;
+        this.fenceService = fenceService;
+        this.goalService = goalService;
+        this.badgeService = badgeService;
     }
 
     @Override
@@ -65,6 +79,7 @@ public class ActivityServiceImpl implements ActivityService {
         Activity activity = new Activity();
         activity.setUserId(userId);
         activity.setType(request.getType());
+        activity.setMode(request.getMode() == null ? 1 : request.getMode());
         activity.setDistanceMeters((int) Math.round(distance));
         activity.setDurationSeconds((int) durationSeconds);
         activity.setAvgSpeed(BigDecimal.valueOf(avgSpeedKmh).setScale(2, RoundingMode.HALF_UP));
@@ -83,9 +98,26 @@ public class ActivityServiceImpl implements ActivityService {
 
         activity.setTrackJson(serializeTrack(track));
 
+        if (isExclusiveMode(activity.getMode())) {
+            FenceMatchResult match = fenceService.evaluate(track);
+            activity.setInvalid(match.invalid() ? 1 : 0);
+            activity.setFenceId(match.fenceId());
+            activity.setOutsideRatio(match.outsideRatio());
+        } else {
+            activity.setInvalid(0);
+        }
+
         activityMapper.insert(activity);
 
-        leaderboardService.recordActivity(userId, activity.getDistanceMeters(), activity.getStartTime(), activity.getType());
+        if (activity.getInvalid() == null || activity.getInvalid() == 0) {
+            leaderboardService.recordActivity(userId, activity.getDistanceMeters(), activity.getStartTime(), activity.getType());
+            goalService.addProgress(userId, activity.getDistanceMeters(), activity.getStartTime());
+            try {
+                badgeService.evaluateOnActivity(userId, activity.getDistanceMeters(), activity.getStartTime());
+            } catch (Exception e) {
+                log.error("勋章判发失败，userId={}", userId, e);
+            }
+        }
 
         return buildCreateResponse(activity, (int) durationSeconds);
     }
@@ -122,6 +154,8 @@ public class ActivityServiceImpl implements ActivityService {
         ActivityDetailResponse response = new ActivityDetailResponse();
         response.setActivityId(activity.getId());
         response.setType(activity.getType());
+        response.setMode(activity.getMode());
+        response.setInvalid(activity.getInvalid());
         response.setDistanceMeters(activity.getDistanceMeters());
         response.setDurationSeconds(activity.getDurationSeconds());
         response.setAvgSpeed(activity.getAvgSpeed());
@@ -169,10 +203,16 @@ public class ActivityServiceImpl implements ActivityService {
         return points;
     }
 
+    private boolean isExclusiveMode(Integer mode) {
+        return mode != null && mode == 2;
+    }
+
     private ActivityCreateResponse buildCreateResponse(Activity activity, int durationSeconds) {
         ActivityCreateResponse response = new ActivityCreateResponse();
         response.setActivityId(activity.getId());
         response.setType(activity.getType());
+        response.setMode(activity.getMode());
+        response.setInvalid(activity.getInvalid());
         response.setDistanceMeters(activity.getDistanceMeters());
         response.setDurationSeconds(durationSeconds);
         response.setAvgSpeed(activity.getAvgSpeed());
@@ -187,6 +227,8 @@ public class ActivityServiceImpl implements ActivityService {
         ActivitySummaryResponse response = new ActivitySummaryResponse();
         response.setActivityId(activity.getId());
         response.setType(activity.getType());
+        response.setMode(activity.getMode());
+        response.setInvalid(activity.getInvalid());
         response.setDistanceMeters(activity.getDistanceMeters());
         response.setDurationSeconds(activity.getDurationSeconds());
         response.setAvgSpeed(activity.getAvgSpeed());

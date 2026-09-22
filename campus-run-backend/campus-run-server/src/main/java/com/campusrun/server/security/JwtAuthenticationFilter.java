@@ -1,5 +1,6 @@
 package com.campusrun.server.security;
 
+import com.campusrun.server.enums.UserRole;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -36,10 +37,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     Claims claims = jwtTokenProvider.parseToken(token);
                     Long userId = Long.valueOf(claims.getSubject());
                     String uniqueId = claims.get("uniqueId", String.class);
-                    LoginUser loginUser = new LoginUser(userId, uniqueId);
+                    Integer role = claims.get("role", Integer.class);
+                    LoginUser loginUser = new LoginUser(userId, uniqueId, role);
+                    String authority = (role != null && role == UserRole.ADMIN.getCode())
+                            ? "ROLE_ADMIN" : "ROLE_USER";
                     UsernamePasswordAuthenticationToken authentication =
                             new UsernamePasswordAuthenticationToken(loginUser, null,
-                                    List.of(new SimpleGrantedAuthority("ROLE_USER")));
+                                    List.of(new SimpleGrantedAuthority(authority)));
                     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                     SecurityContextHolder.getContext().setAuthentication(authentication);
                 }

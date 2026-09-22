@@ -7,6 +7,7 @@ import com.campusrun.server.dto.request.LoginRequest;
 import com.campusrun.server.dto.request.RegisterRequest;
 import com.campusrun.server.dto.response.LoginResponse;
 import com.campusrun.server.entity.User;
+import com.campusrun.server.enums.UserRole;
 import com.campusrun.server.mapper.UserMapper;
 import com.campusrun.server.security.JwtTokenProvider;
 import com.campusrun.server.service.AuthService;
@@ -45,9 +46,10 @@ public class AuthServiceImpl implements AuthService {
         user.setPhone(request.getPhone());
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setNickname(request.getNickname());
+        user.setRole(UserRole.USER.getCode());
         userMapper.insert(user);
 
-        String token = jwtTokenProvider.generateToken(user.getId(), user.getUniqueId());
+        String token = jwtTokenProvider.generateToken(user.getId(), user.getUniqueId(), user.getRole());
         return buildLoginResponse(user, token);
     }
 
@@ -62,7 +64,7 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ErrorCode.PASSWORD_ERROR);
         }
 
-        String token = jwtTokenProvider.generateToken(user.getId(), user.getUniqueId());
+        String token = jwtTokenProvider.generateToken(user.getId(), user.getUniqueId(), user.getRole());
         return buildLoginResponse(user, token);
     }
 

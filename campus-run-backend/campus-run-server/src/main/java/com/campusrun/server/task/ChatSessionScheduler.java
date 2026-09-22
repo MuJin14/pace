@@ -1,10 +1,12 @@
 package com.campusrun.server.task;
 
 import com.campusrun.server.websocket.WebSocketSessionManager;
+import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
+@Profile("!test")
 public class ChatSessionScheduler {
 
     private static final long IDLE_TIMEOUT_MILLIS = 90_000L;

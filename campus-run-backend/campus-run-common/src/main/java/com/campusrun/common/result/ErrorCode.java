@@ -14,6 +14,11 @@ public enum ErrorCode {
     CANNOT_FRIEND_SELF(3003, "不能添加自己为好友"),
     FRIEND_NOT_FOUND(3004, "对方不是你的好友"),
     MESSAGE_CONTENT_INVALID(4001, "消息内容为空或超长"),
+    FORBIDDEN(403, "无权限"),
+    FENCE_NOT_FOUND(5001, "围栏不存在"),
+    GOAL_EXISTS(5002, "同周期目标已存在"),
+    GOAL_NOT_FOUND(5003, "目标不存在"),
+    GOAL_INVALID(5004, "目标不可操作"),
     INTERNAL_ERROR(500, "服务器内部错误");
 
     private final int code;

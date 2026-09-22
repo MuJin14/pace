@@ -56,7 +56,7 @@ class AuthServiceImplTest {
         when(userMapper.selectCount(any())).thenReturn(0L);
         when(uniqueIdGenerator.generate(userMapper)).thenReturn("CR-00001234");
         when(passwordEncoder.encode("secret123")).thenReturn("hashed-password");
-        when(jwtTokenProvider.generateToken(any(), any())).thenReturn("token-1");
+        when(jwtTokenProvider.generateToken(any(), any(), any())).thenReturn("token-1");
 
         doAnswer(invocation -> {
             User u = invocation.getArgument(0);
@@ -103,7 +103,7 @@ class AuthServiceImplTest {
 
         when(userMapper.selectOne(any())).thenReturn(user);
         when(passwordEncoder.matches("secret123", "hashed")).thenReturn(true);
-        when(jwtTokenProvider.generateToken(1L, "CR-00001234")).thenReturn("token-1");
+        when(jwtTokenProvider.generateToken(any(), any(), any())).thenReturn("token-1");
 
         LoginRequest request = new LoginRequest();
         request.setPhone("13800138000");

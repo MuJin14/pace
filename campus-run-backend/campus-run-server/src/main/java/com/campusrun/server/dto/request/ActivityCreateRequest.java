@@ -17,6 +17,10 @@ public class ActivityCreateRequest {
     @Max(value = 2, message = "运动类型不合法")
     private Integer type;
 
+    @Min(value = 1, message = "模式不合法")
+    @Max(value = 2, message = "模式不合法")
+    private Integer mode;
+
     @NotNull(message = "开始时间不能为空")
     private Long startTime;
 
@@ -36,6 +40,14 @@ public class ActivityCreateRequest {
 
     public void setType(Integer type) {
         this.type = type;
+    }
+
+    public Integer getMode() {
+        return mode;
+    }
+
+    public void setMode(Integer mode) {
+        this.mode = mode;
     }
 
     public Long getStartTime() {

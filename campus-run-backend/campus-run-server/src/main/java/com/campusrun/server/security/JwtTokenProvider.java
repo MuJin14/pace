@@ -1,6 +1,7 @@
 package com.campusrun.server.security;
 
 import com.campusrun.server.config.JwtProperties;
+import com.campusrun.server.enums.UserRole;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -22,11 +23,17 @@ public class JwtTokenProvider {
     }
 
     public String generateToken(Long userId, String uniqueId) {
+        return generateToken(userId, uniqueId, UserRole.USER.getCode());
+    }
+
+    public String generateToken(Long userId, String uniqueId, Integer role) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + jwtProperties.getExpiration() * 1000L);
+        int effectiveRole = role == null ? UserRole.USER.getCode() : role;
         return Jwts.builder()
                 .subject(String.valueOf(userId))
                 .claim("uniqueId", uniqueId)
+                .claim("role", effectiveRole)
                 .issuedAt(now)
                 .expiration(expiry)
                 .signWith(secretKey)

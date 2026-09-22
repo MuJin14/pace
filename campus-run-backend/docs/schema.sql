@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS `user` (
     `password_hash` VARCHAR(100) NOT NULL COMMENT 'BCrypt 密码哈希',
     `nickname`      VARCHAR(30)  NOT NULL COMMENT '昵称',
     `avatar_url`    VARCHAR(255) DEFAULT NULL COMMENT '头像地址',
+    `role`          TINYINT      NOT NULL DEFAULT 0 COMMENT '角色：0=普通 1=管理员',
     `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
     `updated_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
                                  ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -29,6 +30,10 @@ CREATE TABLE IF NOT EXISTS `activity` (
     `id`               BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
     `user_id`          BIGINT        NOT NULL COMMENT '所属用户ID',
     `type`             TINYINT       NOT NULL COMMENT '运动类型：1=跑步 2=骑行',
+    `mode`             TINYINT       NOT NULL DEFAULT 1 COMMENT '模式：1=普通 2=专属',
+    `invalid`          TINYINT       NOT NULL DEFAULT 0 COMMENT '是否无效：0=有效 1=无效',
+    `fence_id`         BIGINT        DEFAULT NULL COMMENT '命中的校园围栏ID',
+    `outside_ratio`    DECIMAL(5,4)  DEFAULT NULL COMMENT '围栏外轨迹点占比',
     `distance_meters`  INT           NOT NULL DEFAULT 0 COMMENT '距离（米），服务端计算',
     `duration_seconds` INT           NOT NULL DEFAULT 0 COMMENT '时长（秒），服务端计算',
     `avg_speed`        DECIMAL(6,2)  DEFAULT NULL COMMENT '平均速度（km/h），服务端计算',
@@ -100,3 +105,98 @@ CREATE TABLE IF NOT EXISTS `message` (
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci
   COMMENT = '聊天消息表';
+
+CREATE TABLE IF NOT EXISTS `campus_fence` (
+    `id`                    BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `name`                  VARCHAR(50)   NOT NULL COMMENT '围栏名称',
+    `center_lat`            DECIMAL(10,7) NOT NULL COMMENT '中心纬度',
+    `center_lng`            DECIMAL(10,7) NOT NULL COMMENT '中心经度',
+    `radius_meters`         INT           NOT NULL COMMENT '半径（米）',
+    `allowed_outside_ratio` DECIMAL(5,4)  NOT NULL DEFAULT 0.3000 COMMENT '允许在围栏外的轨迹点比例',
+    `enabled`               TINYINT       NOT NULL DEFAULT 1 COMMENT '是否启用：0=否 1=是',
+    `created_at`            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at`            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                          ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_enabled` (`enabled`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT = '校园围栏表';
+
+CREATE TABLE IF NOT EXISTS `user_goal` (
+    `id`                      BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `user_id`                 BIGINT      NOT NULL COMMENT '用户ID',
+    `period_type`             VARCHAR(20) NOT NULL COMMENT '周期类型：weekly/monthly/custom',
+    `target_distance_meters`  INT         NOT NULL COMMENT '目标距离（米）',
+    `current_distance_meters` INT         NOT NULL DEFAULT 0 COMMENT '当前累计距离（米）',
+    `start_date`              DATE        NOT NULL COMMENT '开始日期',
+    `end_date`                DATE        NOT NULL COMMENT '结束日期',
+    `status`                  TINYINT     NOT NULL DEFAULT 0 COMMENT '状态：0=进行中 1=已完成 2=已过期 3=已取消',
+    `created_at`              DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at`              DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                         ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_user_status` (`user_id`, `status`),
+    KEY `idx_user_period_status` (`user_id`, `period_type`, `status`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT = '用户运动目标表';
+
+CREATE TABLE IF NOT EXISTS `badge` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `code`        VARCHAR(50)  NOT NULL COMMENT '唯一码',
+    `name`        VARCHAR(50)  NOT NULL COMMENT '名称',
+    `icon`        VARCHAR(255) DEFAULT NULL COMMENT '图标 URL',
+    `description` VARCHAR(255) DEFAULT NULL COMMENT '描述',
+    `rule_type`   VARCHAR(30)  NOT NULL COMMENT '规则类型：total_distance/activity_count/streak_days/weekly_goal_complete',
+    `rule_value`  INT          NOT NULL COMMENT '规则阈值/次数',
+    `enabled`     TINYINT      NOT NULL DEFAULT 1 COMMENT '是否启用',
+    `sort`        INT          NOT NULL DEFAULT 0 COMMENT '排序',
+    `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_code` (`code`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT = '勋章定义表';
+
+CREATE TABLE IF NOT EXISTS `user_badge` (
+    `id`         BIGINT   NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `user_id`    BIGINT   NOT NULL COMMENT '用户ID',
+    `badge_id`   BIGINT   NOT NULL COMMENT '勋章ID',
+    `awarded_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '获得时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_badge` (`user_id`, `badge_id`),
+    KEY `idx_badge` (`badge_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT = '用户勋章表';
+
+CREATE TABLE IF NOT EXISTS `user_stats` (
+    `user_id`                    BIGINT NOT NULL COMMENT '用户ID（主键）',
+    `total_distance_meters`      INT    NOT NULL DEFAULT 0 COMMENT '累计有效里程（米）',
+    `total_activity_count`       INT    NOT NULL DEFAULT 0 COMMENT '累计有效运动次数',
+    `streak_days`                INT    NOT NULL DEFAULT 0 COMMENT '连续打卡天数',
+    `last_activity_date`         DATE   DEFAULT NULL COMMENT '最近一次有效运动日期',
+    `weekly_goal_completed_count` INT   NOT NULL DEFAULT 0 COMMENT '完成周目标次数',
+    `updated_at`                 DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                          ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`user_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT = '用户运动统计表';
+
+-- 勋章种子数据
+INSERT IGNORE INTO `badge` (`code`, `name`, `icon`, `description`, `rule_type`, `rule_value`, `enabled`, `sort`) VALUES
+('distance_10km',   '初跑10公里',   NULL, '累计有效里程达到 10 公里',   'total_distance', 10000, 1, 1),
+('distance_100km',  '百公里达人',   NULL, '累计有效里程达到 100 公里',  'total_distance', 100000, 1, 2),
+('distance_500km',  '五百公里大神', NULL, '累计有效里程达到 500 公里',  'total_distance', 500000, 1, 3),
+('count_10',        '十次运动',     NULL, '累计完成 10 次有效运动',    'activity_count', 10, 1, 4),
+('count_100',       '百次运动',     NULL, '累计完成 100 次有效运动',   'activity_count', 100, 1, 5),
+('streak_7',        '连续打卡7天',  NULL, '连续 7 天完成有效运动',     'streak_days', 7, 1, 6),
+('streak_30',       '连续打卡30天', NULL, '连续 30 天完成有效运动',    'streak_days', 30, 1, 7),
+('weekly_goal_1',   '周目标达成',   NULL, '首次完成周目标',           'weekly_goal_complete', 1, 1, 8);

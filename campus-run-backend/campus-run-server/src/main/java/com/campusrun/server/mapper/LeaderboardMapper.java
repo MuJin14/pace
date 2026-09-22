@@ -68,7 +68,7 @@ public interface LeaderboardMapper extends BaseMapper<LeaderboardStat> {
             INSERT INTO leaderboard_stats (user_id, scope, period, type, distance_meters)
             SELECT user_id, 'rolling30d', 'CURRENT', #{type}, SUM(distance_meters)
             FROM activity
-            WHERE start_time >= #{cutoff} AND type = #{type}
+            WHERE start_time >= #{cutoff} AND type = #{type} AND invalid = 0
             GROUP BY user_id
             """)
     int insertRolling30d(@Param("type") int type, @Param("cutoff") LocalDateTime cutoff);

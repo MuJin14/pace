@@ -10,8 +10,11 @@ import com.campusrun.server.dto.response.ActivityCreateResponse;
 import com.campusrun.server.dto.response.ActivityDetailResponse;
 import com.campusrun.server.dto.response.ActivitySummaryResponse;
 import com.campusrun.server.dto.response.LoginResponse;
+import com.campusrun.server.cache.FenceCache;
 import com.campusrun.server.entity.Activity;
+import com.campusrun.server.entity.CampusFence;
 import com.campusrun.server.mapper.ActivityMapper;
+import com.campusrun.server.mapper.CampusFenceMapper;
 import com.campusrun.server.service.ActivityService;
 import com.campusrun.server.service.AuthService;
 import org.junit.jupiter.api.Test;
@@ -20,11 +23,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,6 +48,12 @@ class ActivityServiceImplTest {
 
     @Autowired
     private ActivityMapper activityMapper;
+
+    @Autowired
+    private CampusFenceMapper fenceMapper;
+
+    @Autowired
+    private FenceCache fenceCache;
 
     private Long registerUser(String phone) {
         RegisterRequest req = new RegisterRequest();
@@ -77,6 +88,25 @@ class ActivityServiceImplTest {
         r.setEndTime(end);
         r.setTrack(track);
         return r;
+    }
+
+    private ActivityCreateRequest requestWithMode(Integer type, Integer mode, long start, long end,
+                                                  List<TrackPointRequest> track) {
+        ActivityCreateRequest r = request(type, start, end, track);
+        r.setMode(mode);
+        return r;
+    }
+
+    private void insertFence(double lat, double lng, int radius) {
+        CampusFence fence = new CampusFence();
+        fence.setName("操场");
+        fence.setCenterLat(BigDecimal.valueOf(lat));
+        fence.setCenterLng(BigDecimal.valueOf(lng));
+        fence.setRadiusMeters(radius);
+        fence.setAllowedOutsideRatio(new BigDecimal("0.3000"));
+        fence.setEnabled(1);
+        fenceMapper.insert(fence);
+        fenceCache.invalidate();
     }
 
     @Test
@@ -221,5 +251,55 @@ class ActivityServiceImplTest {
         BusinessException e = assertThrows(BusinessException.class,
                 () -> activityService.getDetail(a, 999_999_999L));
         assertEquals(ErrorCode.ACTIVITY_NOT_FOUND.getCode(), e.getCode());
+    }
+
+    @Test
+    void create_exclusiveMode_insideFence_valid() {
+        Long userId = registerUser("13900000021");
+        insertFence(39.0, 116.0, 100_000);
+
+        ActivityCreateRequest req = requestWithMode(1, 2, BASE, BASE + 120_000L, line(3, BASE, 60_000L));
+
+        ActivityCreateResponse resp = activityService.create(userId, req);
+
+        assertEquals(0, resp.getInvalid());
+        Activity saved = activityMapper.selectById(resp.getActivityId());
+        assertEquals(0, saved.getInvalid());
+        assertNotNull(saved.getFenceId());
+    }
+
+    @Test
+    void create_exclusiveMode_outsideFence_invalid() {
+        Long userId = registerUser("13900000022");
+        insertFence(39.0, 116.0, 100);
+
+        List<TrackPointRequest> track = List.of(
+                point(40.0, 117.0, BASE),
+                point(40.001, 117.001, BASE + 60_000L),
+                point(40.002, 117.002, BASE + 120_000L));
+        ActivityCreateRequest req = requestWithMode(1, 2, BASE, BASE + 120_000L, track);
+
+        ActivityCreateResponse resp = activityService.create(userId, req);
+
+        assertEquals(1, resp.getInvalid());
+        Activity saved = activityMapper.selectById(resp.getActivityId());
+        assertEquals(1, saved.getInvalid());
+        assertNull(saved.getFenceId());
+    }
+
+    @Test
+    void create_normalMode_noGeofence_valid() {
+        Long userId = registerUser("13900000023");
+        insertFence(39.0, 116.0, 100);
+
+        List<TrackPointRequest> track = List.of(
+                point(40.0, 117.0, BASE),
+                point(40.001, 117.001, BASE + 60_000L),
+                point(40.002, 117.002, BASE + 120_000L));
+        ActivityCreateRequest req = requestWithMode(1, 1, BASE, BASE + 120_000L, track);
+
+        ActivityCreateResponse resp = activityService.create(userId, req);
+
+        assertEquals(0, resp.getInvalid());
     }
 }

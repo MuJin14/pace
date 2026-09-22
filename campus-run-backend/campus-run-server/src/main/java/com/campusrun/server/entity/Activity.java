@@ -15,6 +15,10 @@ public class Activity {
 
     private Long userId;
     private Integer type;
+    private Integer mode;
+    private Integer invalid;
+    private Long fenceId;
+    private BigDecimal outsideRatio;
     private Integer distanceMeters;
     private Integer durationSeconds;
     private BigDecimal avgSpeed;
@@ -51,6 +55,38 @@ public class Activity {
 
     public void setType(Integer type) {
         this.type = type;
+    }
+
+    public Integer getMode() {
+        return mode;
+    }
+
+    public void setMode(Integer mode) {
+        this.mode = mode;
+    }
+
+    public Integer getInvalid() {
+        return invalid;
+    }
+
+    public void setInvalid(Integer invalid) {
+        this.invalid = invalid;
+    }
+
+    public Long getFenceId() {
+        return fenceId;
+    }
+
+    public void setFenceId(Long fenceId) {
+        this.fenceId = fenceId;
+    }
+
+    public BigDecimal getOutsideRatio() {
+        return outsideRatio;
+    }
+
+    public void setOutsideRatio(BigDecimal outsideRatio) {
+        this.outsideRatio = outsideRatio;
     }
 
     public Integer getDistanceMeters() {
