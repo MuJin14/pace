@@ -82,3 +82,4 @@ UPDATE `user` SET `role` = 1 WHERE `phone` = '13800138000';
 - 消息不支持图片等富媒体
 - 消息已读回执未实现（`read_at` 字段已预留）
 - 管理员暂无前端管理界面
+- `GoalService.create` 目前要求客户端传 `startDate`/`endDate`；应改为服务端根据 `periodType` 自动推导（`weekly` = 本周一至周日，`monthly` = 本月 1 日至月末），`custom` 类型才由客户端指定日期
