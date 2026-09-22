@@ -25,6 +25,10 @@ jwt:
   secret: campus-run-jwt-secret-key-please-change-this-in-production-0123456789
   expiration: 86400
 
+app:
+  cors:
+    allowed-origins: "http://localhost:*,http://127.0.0.1:*"
+
 logging:
   level:
     com.campusrun: debug
