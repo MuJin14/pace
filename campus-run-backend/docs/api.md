@@ -16,12 +16,17 @@
 | 0    | 成功 |
 | 400  | 参数错误 |
 | 401  | 未认证或登录已过期 |
+| 403  | 无权限 |
 | 1001 | 手机号已注册 |
 | 1002 | 用户不存在 |
 | 1003 | 密码错误 |
 | 2001 | 运动记录不存在 |
 | 2002 | 无权访问该运动记录 |
 | 500  | 服务器内部错误 |
+| 5001 | 围栏不存在 |
+| 5002 | 同周期目标已存在 |
+| 5003 | 目标不存在 |
+| 5004 | 目标不可操作 |
 
 ## 1. 注册
 
@@ -289,5 +294,240 @@ Authorization: Bearer <token>
 {
   "code": 0, "message": "成功",
   "data": { "rank": 7, "distanceMeters": 5200, "total": 128 }
+}
+```
+
+---
+
+# 第五阶段 — 专属模式（围栏 / 目标 / 勋章）
+
+以下接口均需携带 `Authorization: Bearer <token>`。围栏管理为管理员专用，非管理员角色访问返回 `403`。
+
+## 围栏管理（/api/v1/admin/fences）
+
+围栏用于防作弊：运动轨迹需满足「轨迹点落在围栏内的比例 ≥ 1 - allowedOutsideRatio」才判定有效。所有接口均需 `ADMIN` 角色。
+
+### 9. 围栏列表
+
+```
+GET /api/v1/admin/fences
+Authorization: Bearer <token>
+```
+
+成功响应 `data` 为围栏数组：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": [
+    {
+      "id": 1, "name": "东操场围栏",
+      "centerLat": 39.9042, "centerLng": 116.4074,
+      "radiusMeters": 500, "allowedOutsideRatio": 0.3000,
+      "enabled": 1, "createdAt": "2026-09-22 20:00:00", "updatedAt": "2026-09-22 20:00:00"
+    }
+  ]
+}
+```
+
+### 10. 围栏详情
+
+```
+GET /api/v1/admin/fences/{id}
+Authorization: Bearer <token>
+```
+
+- 围栏不存在返回 `5001`。响应结构与列表条目一致。
+
+### 11. 新增围栏
+
+```
+POST /api/v1/admin/fences
+Authorization: Bearer <token>
+```
+
+请求体：
+
+```json
+{
+  "name": "东操场围栏",
+  "centerLat": 39.9042,
+  "centerLng": 116.4074,
+  "radiusMeters": 500,
+  "allowedOutsideRatio": 0.3
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 是 | 围栏名称，最长 50 字符 |
+| centerLat | number | 是 | 中心纬度，范围 -90 ~ 90 |
+| centerLng | number | 是 | 中心经度，范围 -180 ~ 180 |
+| radiusMeters | int | 是 | 围栏半径（米），≥ 1 |
+| allowedOutsideRatio | number | 否 | 允许落在围栏外的轨迹点比例，范围 0 ~ 1；缺省为 0.3 |
+
+成功响应 `data` 为新建围栏（`enabled=1`）：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": {
+    "id": 2, "name": "东操场围栏",
+    "centerLat": 39.9042, "centerLng": 116.4074,
+    "radiusMeters": 500, "allowedOutsideRatio": 0.3000,
+    "enabled": 1, "createdAt": "2026-09-22 20:00:00", "updatedAt": "2026-09-22 20:00:00"
+  }
+}
+```
+
+### 12. 修改围栏
+
+```
+PUT /api/v1/admin/fences/{id}
+Authorization: Bearer <token>
+```
+
+请求体字段与「新增围栏」一致（全量更新）。围栏不存在返回 `5001`。
+
+### 13. 停用围栏
+
+```
+DELETE /api/v1/admin/fences/{id}
+Authorization: Bearer <token>
+```
+
+- 逻辑删除：将 `enabled` 置为 0，不物理删除记录。围栏不存在返回 `5001`。
+- 成功返回 `{ "code": 0, "message": "成功", "data": null }`。
+
+## 目标管理（/api/v1/goals）
+
+目标用于记录用户在某一周期内的距离目标，完成进度随运动记录自动累加。
+
+### 14. 创建目标
+
+```
+POST /api/v1/goals
+Authorization: Bearer <token>
+```
+
+请求体：
+
+```json
+{
+  "periodType": "weekly",
+  "targetDistanceMeters": 20000,
+  "startDate": "2026-09-22",
+  "endDate": "2026-09-27"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| periodType | string | 是 | 周期类型：`weekly` / `monthly` / `custom` |
+| targetDistanceMeters | int | 是 | 目标距离（米），≥ 1 |
+| startDate | string | 是 | 开始日期 `yyyy-MM-dd` |
+| endDate | string | 是 | 结束日期 `yyyy-MM-dd`，不得早于开始日期 |
+
+- `periodType` 非法或结束日期早于开始日期返回 `400`。
+- 同周期下已存在进行中的目标返回 `5002`。
+
+成功响应：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": {
+    "id": 1, "periodType": "weekly",
+    "targetDistanceMeters": 20000, "currentDistanceMeters": 0,
+    "startDate": "2026-09-22", "endDate": "2026-09-27",
+    "status": 0, "createdAt": "2026-09-22 20:00:00"
+  }
+}
+```
+
+### 15. 目标列表
+
+```
+GET /api/v1/goals
+Authorization: Bearer <token>
+```
+
+- 仅返回当前用户的目标，按 `id` 倒序。
+- 成功响应 `data` 为目标数组，条目字段同「创建目标」的 `data`。
+
+### 16. 目标详情
+
+```
+GET /api/v1/goals/{id}
+Authorization: Bearer <token>
+```
+
+- 目标不存在或不属于当前用户返回 `5003`。响应结构同列表条目。
+
+### 17. 取消目标
+
+```
+DELETE /api/v1/goals/{id}
+Authorization: Bearer <token>
+```
+
+- 仅 `status=0`（进行中）的目标可取消，否则返回 `5004`；目标不存在返回 `5003`。
+- 成功返回 `{ "code": 0, "message": "成功", "data": null }`。
+
+`status` 取值：`0`=进行中 `1`=已完成 `2`=已过期 `3`=已取消。
+
+## 勋章查询（/api/v1/badges）
+
+### 18. 全部勋章
+
+```
+GET /api/v1/badges
+Authorization: Bearer <token>
+```
+
+- 返回全部启用勋章（含是否已获得），按 `sort`、`id` 升序。
+- `earned` 为当前用户是否已获得该勋章；`awardedAt` 仅在已获得时有值。
+
+成功响应：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": [
+    {
+      "id": 1, "code": "first_5k", "name": "首跑五公里",
+      "icon": "https://cdn.example.com/badges/first_5k.png",
+      "description": "单次运动距离达到 5 公里",
+      "ruleType": "total_distance", "ruleValue": 5000,
+      "earned": true, "awardedAt": "2026-09-22 21:00:00"
+    }
+  ]
+}
+```
+
+`ruleType` 取值：`total_distance`（累计距离）/ `activity_count`（运动次数）/ `streak_days`（连续天数）/ `weekly_goal_complete`（周目标完成次数）。
+
+### 19. 我的勋章
+
+```
+GET /api/v1/badges/mine
+Authorization: Bearer <token>
+```
+
+- 仅返回当前用户已获得的勋章，按获得时间倒序。
+
+成功响应：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": [
+    {
+      "badgeId": 1, "code": "first_5k", "name": "首跑五公里",
+      "icon": "https://cdn.example.com/badges/first_5k.png",
+      "description": "单次运动距离达到 5 公里",
+      "awardedAt": "2026-09-22 21:00:00"
+    }
+  ]
 }
 ```
