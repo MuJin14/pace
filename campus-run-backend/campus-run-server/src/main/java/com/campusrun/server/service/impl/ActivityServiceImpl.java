@@ -62,6 +62,9 @@ public class ActivityServiceImpl implements ActivityService {
         this.badgeService = badgeService;
     }
 
+    /**
+     * 计算距离 → 专属模式围栏校验 → 落库 → 有效记录联动排行榜/目标/勋章。
+     */
     @Override
     @Transactional
     public ActivityCreateResponse create(Long userId, ActivityCreateRequest request) {

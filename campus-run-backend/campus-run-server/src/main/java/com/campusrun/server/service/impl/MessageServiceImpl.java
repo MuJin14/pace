@@ -44,6 +44,9 @@ public class MessageServiceImpl implements MessageService {
         this.sessionManager = sessionManager;
     }
 
+    /**
+     * 先落库 → 对方在线则推送并标记已投递，否则留作离线消息。
+     */
     @Override
     @Transactional
     public ChatMessageResponse sendMessage(Long senderId, Long receiverId, String content) {

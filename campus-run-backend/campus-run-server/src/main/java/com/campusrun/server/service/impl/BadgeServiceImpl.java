@@ -94,6 +94,9 @@ public class BadgeServiceImpl implements BadgeService {
         }).toList();
     }
 
+    /**
+     * 更新用户统计后遍历启用勋章判发策略，命中则落库并发事件。
+     */
     @Override
     public void evaluateOnActivity(Long userId, int distanceMeters, LocalDateTime startTime) {
         LocalDate activityDate = startTime.atZone(ZONE).toLocalDate();

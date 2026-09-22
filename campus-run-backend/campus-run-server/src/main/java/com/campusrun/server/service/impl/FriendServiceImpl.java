@@ -44,6 +44,9 @@ public class FriendServiceImpl implements FriendService {
         return new PageResponse<>(total, safePage, safeSize, list);
     }
 
+    /**
+     * 若对方已向你发起 PENDING 申请，事务内自动接受，双方立即成为好友。
+     */
     @Override
     @Transactional
     public void sendRequest(Long userId, Long targetUserId) {

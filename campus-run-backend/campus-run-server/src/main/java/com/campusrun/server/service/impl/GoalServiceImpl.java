@@ -101,6 +101,9 @@ public class GoalServiceImpl implements GoalService {
         goalMapper.updateById(goal);
     }
 
+    /**
+     * 按 startTime 匹配每个进行中目标的所属周期，命中才累加进度。
+     */
     @Override
     public void addProgress(Long userId, int distanceMeters, LocalDateTime startTime) {
         List<UserGoal> activeGoals = goalMapper.selectList(new LambdaQueryWrapper<UserGoal>()
