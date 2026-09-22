@@ -76,11 +76,16 @@ public class ActivityServiceImpl implements ActivityService {
         long durationSeconds = (request.getEndTime() - request.getStartTime()) / 1000;
         double avgSpeedKmh = (distance / 1000.0) / (durationSeconds / 3600.0);
 
+        int mode = request.getMode() == null ? 1 : request.getMode();
+        int distanceMeters = (int) Math.round(distance);
+        log.info("创建运动记录，userId={}, type={}, mode={}, trackPoints={}, distanceMeters={}",
+                userId, request.getType(), mode, track.size(), distanceMeters);
+
         Activity activity = new Activity();
         activity.setUserId(userId);
         activity.setType(request.getType());
-        activity.setMode(request.getMode() == null ? 1 : request.getMode());
-        activity.setDistanceMeters((int) Math.round(distance));
+        activity.setMode(mode);
+        activity.setDistanceMeters(distanceMeters);
         activity.setDurationSeconds((int) durationSeconds);
         activity.setAvgSpeed(BigDecimal.valueOf(avgSpeedKmh).setScale(2, RoundingMode.HALF_UP));
         activity.setCalories(request.getCalories() == null
@@ -103,6 +108,10 @@ public class ActivityServiceImpl implements ActivityService {
             activity.setInvalid(match.invalid() ? 1 : 0);
             activity.setFenceId(match.fenceId());
             activity.setOutsideRatio(match.outsideRatio());
+            if (match.fenceId() != null || match.invalid()) {
+                log.info("围栏校验命中，fenceId={}, outsideRatio={}, invalid={}",
+                        match.fenceId(), match.outsideRatio(), match.invalid());
+            }
         } else {
             activity.setInvalid(0);
         }
@@ -119,6 +128,7 @@ public class ActivityServiceImpl implements ActivityService {
             }
         }
 
+        log.info("创建运动记录完成，activityId={}, invalid={}", activity.getId(), activity.getInvalid());
         return buildCreateResponse(activity, (int) durationSeconds);
     }
 

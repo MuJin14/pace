@@ -8,6 +8,8 @@ import com.campusrun.server.dto.response.MyRankResponse;
 import com.campusrun.server.enums.LeaderboardScope;
 import com.campusrun.server.mapper.LeaderboardMapper;
 import com.campusrun.server.service.LeaderboardService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,7 @@ import java.util.List;
 @Service
 public class LeaderboardServiceImpl implements LeaderboardService {
 
+    private static final Logger log = LoggerFactory.getLogger(LeaderboardServiceImpl.class);
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final int[] TYPES = {1, 2};
 
@@ -80,25 +83,35 @@ public class LeaderboardServiceImpl implements LeaderboardService {
     @Override
     @Transactional
     public void rebuildRolling30d() {
+        log.info("定时任务开始：rebuildRolling30d");
+        long start = System.currentTimeMillis();
         LocalDateTime cutoff = LocalDate.now(ZONE).minusDays(30).atStartOfDay();
+        int count = 0;
         for (int type : TYPES) {
             leaderboardMapper.deleteRolling30d(type);
-            leaderboardMapper.insertRolling30d(type, cutoff);
+            count += leaderboardMapper.insertRolling30d(type, cutoff);
         }
+        log.info("定时任务完成：rebuildRolling30d, count={}, costMs={}",
+                count, System.currentTimeMillis() - start);
     }
 
     @Override
     @Transactional
     public void cleanupExpired() {
+        log.info("定时任务开始：cleanupExpired");
+        long start = System.currentTimeMillis();
         LocalDate today = LocalDate.now(ZONE);
         String dailyBefore = today.minusDays(32).toString();
         String weeklyBefore = today.minusWeeks(12).with(DayOfWeek.MONDAY).toString();
         String monthlyBefore = YearMonth.now(ZONE).minusMonths(12).toString();
+        int count = 0;
         for (int type : TYPES) {
-            leaderboardMapper.deleteExpired(LeaderboardScope.DAILY.getCode(), type, dailyBefore);
-            leaderboardMapper.deleteExpired(LeaderboardScope.WEEKLY.getCode(), type, weeklyBefore);
-            leaderboardMapper.deleteExpired(LeaderboardScope.MONTHLY.getCode(), type, monthlyBefore);
+            count += leaderboardMapper.deleteExpired(LeaderboardScope.DAILY.getCode(), type, dailyBefore);
+            count += leaderboardMapper.deleteExpired(LeaderboardScope.WEEKLY.getCode(), type, weeklyBefore);
+            count += leaderboardMapper.deleteExpired(LeaderboardScope.MONTHLY.getCode(), type, monthlyBefore);
         }
+        log.info("定时任务完成：cleanupExpired, count={}, costMs={}",
+                count, System.currentTimeMillis() - start);
     }
 
     private LeaderboardScope validateScope(String scope) {

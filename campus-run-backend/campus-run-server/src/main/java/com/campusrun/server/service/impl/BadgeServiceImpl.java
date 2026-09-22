@@ -14,6 +14,8 @@ import com.campusrun.server.mapper.UserBadgeMapper;
 import com.campusrun.server.mapper.UserGoalMapper;
 import com.campusrun.server.mapper.UserStatsMapper;
 import com.campusrun.server.service.BadgeService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +30,7 @@ import java.util.stream.Collectors;
 @Service
 public class BadgeServiceImpl implements BadgeService {
 
+    private static final Logger log = LoggerFactory.getLogger(BadgeServiceImpl.class);
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     private final UserStatsMapper userStatsMapper;
@@ -122,12 +125,18 @@ public class BadgeServiceImpl implements BadgeService {
     @Override
     @Transactional
     public void resetStreaks() {
-        userStatsMapper.resetStreaks(LocalDate.now(ZONE).minusDays(1));
+        log.info("定时任务开始：resetStreaks");
+        long start = System.currentTimeMillis();
+        int count = userStatsMapper.resetStreaks(LocalDate.now(ZONE).minusDays(1));
+        log.info("定时任务完成：resetStreaks, count={}, costMs={}",
+                count, System.currentTimeMillis() - start);
     }
 
     @Override
     @Transactional
     public void checkWeeklyGoals() {
+        log.info("定时任务开始：checkWeeklyGoals");
+        long start = System.currentTimeMillis();
         LocalDate today = LocalDate.now(ZONE);
         List<UserGoal> ended = goalMapper.selectEndedWeeklyGoals(today);
         for (UserGoal goal : ended) {
@@ -147,12 +156,15 @@ public class BadgeServiceImpl implements BadgeService {
                 goalMapper.updateById(goal);
             }
         }
+        log.info("定时任务完成：checkWeeklyGoals, count={}, costMs={}",
+                ended.size(), System.currentTimeMillis() - start);
     }
 
     private void awardEligible(Long userId, int totalDistance, int activityCount, int streakDays, int weeklyGoalCompleted) {
         List<Badge> eligible = badgeMapper.selectEligible(totalDistance, activityCount, streakDays, weeklyGoalCompleted);
         for (Badge badge : eligible) {
             if (userBadgeMapper.insertIgnore(userId, badge.getId()) > 0) {
+                log.info("判发勋章，userId={}, badgeCode={}", userId, badge.getCode());
                 eventPublisher.publishEvent(new BadgeAwardedEvent(userId, badge));
             }
         }

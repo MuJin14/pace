@@ -14,6 +14,8 @@ import com.campusrun.server.mapper.FriendshipMapper;
 import com.campusrun.server.mapper.MessageMapper;
 import com.campusrun.server.service.MessageService;
 import com.campusrun.server.websocket.WebSocketSessionManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +28,7 @@ import java.util.List;
 @Service
 public class MessageServiceImpl implements MessageService {
 
+    private static final Logger log = LoggerFactory.getLogger(MessageServiceImpl.class);
     private static final int OFFLINE_BATCH = 200;
     private static final int MAX_CONTENT_LENGTH = 2000;
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
@@ -74,11 +77,14 @@ public class MessageServiceImpl implements MessageService {
 
         ChatMessageResponse response = toResponse(message, now);
 
-        if (sessionManager.isOnline(receiverId)
-                && sessionManager.sendToUser(receiverId, new WsMessage("message", response))) {
-            message.setDelivered(1);
-            messageMapper.updateById(message);
-            response.setDelivered(1);
+        if (sessionManager.isOnline(receiverId)) {
+            if (sessionManager.sendToUser(receiverId, new WsMessage("message", response))) {
+                message.setDelivered(1);
+                messageMapper.updateById(message);
+                response.setDelivered(1);
+            } else {
+                log.warn("消息推送失败，userId={}, messageId={}", receiverId, message.getId());
+            }
         }
         return response;
     }

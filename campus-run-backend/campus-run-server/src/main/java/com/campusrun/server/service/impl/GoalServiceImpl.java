@@ -11,6 +11,8 @@ import com.campusrun.server.enums.GoalStatus;
 import com.campusrun.server.mapper.UserGoalMapper;
 import com.campusrun.server.mapper.UserMapper;
 import com.campusrun.server.service.GoalService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +25,7 @@ import java.util.List;
 @Service
 public class GoalServiceImpl implements GoalService {
 
+    private static final Logger log = LoggerFactory.getLogger(GoalServiceImpl.class);
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     private final UserGoalMapper goalMapper;
@@ -122,12 +125,18 @@ public class GoalServiceImpl implements GoalService {
                 continue;
             }
             goalMapper.addProgress(goal.getId(), distanceMeters);
+            int newProgress = (goal.getCurrentDistanceMeters() == null ? 0 : goal.getCurrentDistanceMeters())
+                    + distanceMeters;
+            log.info("更新目标进度，userId={}, goalId={}, addedDistance={}, newProgress={}",
+                    userId, goal.getId(), distanceMeters, newProgress);
         }
     }
 
     @Override
     @Transactional
     public void expireOutdated() {
+        log.info("定时任务开始：expireOutdated");
+        long start = System.currentTimeMillis();
         LocalDate today = LocalDate.now(ZONE);
         List<UserGoal> outdated = goalMapper.selectList(new LambdaQueryWrapper<UserGoal>()
                 .eq(UserGoal::getStatus, GoalStatus.ACTIVE.getCode())
@@ -140,6 +149,8 @@ public class GoalServiceImpl implements GoalService {
             }
             goalMapper.updateById(goal);
         }
+        log.info("定时任务完成：expireOutdated, count={}, costMs={}",
+                outdated.size(), System.currentTimeMillis() - start);
     }
 
     private GoalResponse toResponse(UserGoal goal) {
