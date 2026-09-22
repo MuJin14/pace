@@ -1,0 +1,35 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: campus-run-server
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/campus_run?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+  jackson:
+    time-zone: Asia/Shanghai
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.campusrun.server.entity
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+
+jwt:
+  secret: campus-run-jwt-secret-key-please-change-this-in-production-0123456789
+  expiration: 86400
+
+logging:
+  level:
+    com.campusrun: debug
