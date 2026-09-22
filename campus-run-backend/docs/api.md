@@ -22,6 +22,11 @@
 | 1003 | 密码错误 |
 | 2001 | 运动记录不存在 |
 | 2002 | 无权访问该运动记录 |
+| 3001 | 好友申请已存在或已是好友 |
+| 3002 | 好友申请不存在 |
+| 3003 | 不能添加自己为好友 |
+| 3004 | 对方不是你的好友 |
+| 4001 | 消息内容为空或超长 |
 | 500  | 服务器内部错误 |
 | 5001 | 围栏不存在 |
 | 5002 | 同周期目标已存在 |
@@ -299,6 +304,258 @@ Authorization: Bearer <token>
 
 ---
 
+# 第四阶段 — 好友与聊天（Friend & Chat）
+
+以下接口均需携带 `Authorization: Bearer <token>`。
+
+## 好友关系（/api/v1/friend）
+
+好友关系为双向记录：接受申请后写入两条 `ACCEPTED` 记录。`status` 取值：`0`=待处理 `1`=已接受。
+
+### 9. 搜索用户
+
+```
+GET /api/v1/friend/search?keyword=阿强&page=1&size=20
+Authorization: Bearer <token>
+```
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| keyword | string | 是 | - | 关键词，按专属 ID / 昵称 / 手机号模糊匹配 |
+| page | int | 否 | 1 | 页码 |
+| size | int | 否 | 20 | 每页条数，上限 100 |
+
+- 关键词为空返回 `400`。结果排除自己及已是好友的用户。
+
+成功响应 `data` 为分页结构：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": {
+    "total": 3, "page": 1, "size": 20,
+    "list": [
+      { "userId": 9, "uniqueId": "CR-00000009", "nickname": "阿强", "avatarUrl": null }
+    ]
+  }
+}
+```
+
+### 10. 发送好友申请
+
+```
+POST /api/v1/friend/request
+Authorization: Bearer <token>
+```
+
+请求体：
+
+```json
+{ "targetUserId": 9 }
+```
+
+- 不能添加自己返回 `3003`；目标用户不存在返回 `1002`；已存在申请或已是好友返回 `3001`。
+- 若对方已向我发起待处理申请，则自动接受并互为好友（双向 `ACCEPTED`）。
+- 成功返回 `{ "code": 0, "message": "成功", "data": null }`。
+
+### 11. 接受好友申请
+
+```
+POST /api/v1/friend/accept
+Authorization: Bearer <token>
+```
+
+请求体：
+
+```json
+{ "requestId": 1 }
+```
+
+- 申请不存在、已处理或非发给本人返回 `3002`。
+- 成功后建立双向 `ACCEPTED` 记录。
+
+### 12. 拒绝好友申请
+
+```
+POST /api/v1/friend/reject
+Authorization: Bearer <token>
+```
+
+请求体：
+
+```json
+{ "requestId": 1 }
+```
+
+- 申请不存在、已处理或非发给本人返回 `3002`。
+- 拒绝即删除该 `PENDING` 记录（不保留 `REJECTED` 状态，允许再次申请）。
+
+### 13. 收到的申请列表
+
+```
+GET /api/v1/friend/requests
+Authorization: Bearer <token>
+```
+
+- 返回发给本人的待处理申请，按 `id` 倒序。`data` 为数组。
+
+成功响应：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": [
+    { "requestId": 1, "userId": 9, "uniqueId": "CR-00000009",
+      "nickname": "阿强", "avatarUrl": null, "createdAt": "2026-09-22 20:00:00" }
+  ]
+}
+```
+
+### 14. 好友列表
+
+```
+GET /api/v1/friend/list
+Authorization: Bearer <token>
+```
+
+- 返回已接受的好友，按 `friendshipId` 倒序。`data` 为数组。
+
+成功响应：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": [
+    { "friendshipId": 2, "userId": 9, "uniqueId": "CR-00000009",
+      "nickname": "阿强", "avatarUrl": null, "createdAt": "2026-09-22 20:00:00" }
+  ]
+}
+```
+
+### 15. 删除好友
+
+```
+DELETE /api/v1/friend/{friendId}
+Authorization: Bearer <token>
+```
+
+- 非好友返回 `3004`。删除双向 `ACCEPTED` 记录。
+- 成功返回 `{ "code": 0, "message": "成功", "data": null }`。
+
+## 消息历史（/api/v1/message）
+
+### 16. 消息历史
+
+```
+GET /api/v1/message/history?friendId=9&beforeId=100&size=20
+Authorization: Bearer <token>
+```
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| friendId | long | 是 | - | 对方用户 ID |
+| beforeId | long | 否 | 最新 | 游标：返回该消息 ID 之前的消息，缺省取最新一页 |
+| size | int | 否 | 20 | 每页条数，上限 100 |
+
+- 游标式分页，按 `messageId` 倒序（旧→新由客户端自行排序）。响应 `data` 为分页结构，`list` 条目如下：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": {
+    "total": 20, "page": 1, "size": 20,
+    "list": [
+      { "messageId": 100, "senderId": 9, "receiverId": 1, "content": "你好",
+        "type": 1, "delivered": 1, "timestamp": 1726992000000 }
+    ]
+  }
+}
+```
+
+- `type`：`1`=文本；`delivered`：`0`=未送达 `1`=已送达；`timestamp`：毫秒时间戳。
+
+## WebSocket 聊天
+
+### 连接地址
+
+```
+ws://<host>/ws?token=<jwt>
+```
+
+- JWT 通过 URL query 参数 `token` 传递（浏览器 / Flutter WebSocket 无法自定义 Header）；也兼容 `Authorization: Bearer <token>` 头。
+- 握手时校验 JWT，未登录或 token 无效则握手失败、连接不建立。
+- 连接建立后，服务端自动推送该用户未送达的离线消息。
+
+### 消息信封（统一格式）
+
+所有收发消息均使用同一信封：
+
+```json
+{ "type": "string", "data": { } }
+```
+
+### 消息信封 — 客户端 → 服务端
+
+发送聊天消息：
+
+```json
+{ "type": "message", "data": { "receiverId": 9, "content": "你好" } }
+```
+
+心跳：
+
+```json
+{ "type": "heartbeat" }
+```
+
+### 消息信封 — 服务端 → 客户端
+
+聊天消息（推送给接收者）：
+
+```json
+{ "type": "message", "data": { "messageId": 100, "senderId": 9, "receiverId": 1,
+  "content": "你好", "type": 1, "delivered": 1, "timestamp": 1726992000000 } }
+```
+
+发送确认（回给发送者）：
+
+```json
+{ "type": "ack", "data": { "messageId": 100, "senderId": 1, "receiverId": 9,
+  "content": "你好", "type": 1, "delivered": 1, "timestamp": 1726992000000 } }
+```
+
+心跳响应：
+
+```json
+{ "type": "pong", "data": null }
+```
+
+错误：
+
+```json
+{ "type": "error", "data": { "code": 400, "message": "未知消息类型" } }
+```
+
+### 心跳协议
+
+- 客户端定期发送 `{ "type": "heartbeat" }`，服务端回 `{ "type": "pong", "data": null }`。
+- 心跳刷新连接活跃时间；服务端定时扫描并关闭超时未活跃的连接。
+
+### 消息类型说明
+
+| type | 方向 | 说明 |
+|------|------|------|
+| message | client→server | 发送聊天消息，`data = { receiverId, content }` |
+| heartbeat | client→server | 心跳 |
+| message | server→client | 收到聊天消息（推送给接收者） |
+| ack | server→client | 发送结果确认（回给发送者） |
+| pong | server→client | 心跳响应 |
+| error | server→client | 错误，`data = { code, message }` |
+
+发送消息约束：内容为空或超 2000 字符返回 `4001`；非好友返回 `3004`；给自己发消息返回 `3004`。
+
+---
+
 # 第五阶段 — 专属模式（围栏 / 目标 / 勋章）
 
 以下接口均需携带 `Authorization: Bearer <token>`。围栏管理为管理员专用，非管理员角色访问返回 `403`。
@@ -307,7 +564,7 @@ Authorization: Bearer <token>
 
 围栏用于防作弊：运动轨迹需满足「轨迹点落在围栏内的比例 ≥ 1 - allowedOutsideRatio」才判定有效。所有接口均需 `ADMIN` 角色。
 
-### 9. 围栏列表
+### 17. 围栏列表
 
 ```
 GET /api/v1/admin/fences
@@ -330,7 +587,7 @@ Authorization: Bearer <token>
 }
 ```
 
-### 10. 围栏详情
+### 18. 围栏详情
 
 ```
 GET /api/v1/admin/fences/{id}
@@ -339,7 +596,7 @@ Authorization: Bearer <token>
 
 - 围栏不存在返回 `5001`。响应结构与列表条目一致。
 
-### 11. 新增围栏
+### 19. 新增围栏
 
 ```
 POST /api/v1/admin/fences
@@ -380,7 +637,7 @@ Authorization: Bearer <token>
 }
 ```
 
-### 12. 修改围栏
+### 20. 修改围栏
 
 ```
 PUT /api/v1/admin/fences/{id}
@@ -389,7 +646,7 @@ Authorization: Bearer <token>
 
 请求体字段与「新增围栏」一致（全量更新）。围栏不存在返回 `5001`。
 
-### 13. 停用围栏
+### 21. 停用围栏
 
 ```
 DELETE /api/v1/admin/fences/{id}
@@ -403,7 +660,7 @@ Authorization: Bearer <token>
 
 目标用于记录用户在某一周期内的距离目标，完成进度随运动记录自动累加。
 
-### 14. 创建目标
+### 22. 创建目标
 
 ```
 POST /api/v1/goals
@@ -445,7 +702,7 @@ Authorization: Bearer <token>
 }
 ```
 
-### 15. 目标列表
+### 23. 目标列表
 
 ```
 GET /api/v1/goals
@@ -455,7 +712,7 @@ Authorization: Bearer <token>
 - 仅返回当前用户的目标，按 `id` 倒序。
 - 成功响应 `data` 为目标数组，条目字段同「创建目标」的 `data`。
 
-### 16. 目标详情
+### 24. 目标详情
 
 ```
 GET /api/v1/goals/{id}
@@ -464,7 +721,7 @@ Authorization: Bearer <token>
 
 - 目标不存在或不属于当前用户返回 `5003`。响应结构同列表条目。
 
-### 17. 取消目标
+### 25. 取消目标
 
 ```
 DELETE /api/v1/goals/{id}
@@ -478,7 +735,7 @@ Authorization: Bearer <token>
 
 ## 勋章查询（/api/v1/badges）
 
-### 18. 全部勋章
+### 26. 全部勋章
 
 ```
 GET /api/v1/badges
@@ -507,7 +764,7 @@ Authorization: Bearer <token>
 
 `ruleType` 取值：`total_distance`（累计距离）/ `activity_count`（运动次数）/ `streak_days`（连续天数）/ `weekly_goal_complete`（周目标完成次数）。
 
-### 19. 我的勋章
+### 27. 我的勋章
 
 ```
 GET /api/v1/badges/mine
