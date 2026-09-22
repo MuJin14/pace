@@ -49,3 +49,34 @@ CREATE TABLE leaderboard_stats (
 );
 
 CREATE INDEX idx_scope_period_type_distance ON leaderboard_stats (scope, period, type, distance_meters);
+
+DROP TABLE IF EXISTS friendship;
+
+CREATE TABLE friendship (
+    id         BIGINT    NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id    BIGINT    NOT NULL,
+    friend_id  BIGINT    NOT NULL,
+    status     TINYINT   NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_user_friend UNIQUE (user_id, friend_id)
+);
+
+CREATE INDEX idx_friend_status ON friendship (friend_id, status);
+
+DROP TABLE IF EXISTS message;
+
+CREATE TABLE message (
+    id          BIGINT        NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    sender_id   BIGINT        NOT NULL,
+    receiver_id BIGINT        NOT NULL,
+    content     VARCHAR(2000) NOT NULL,
+    type        TINYINT       NOT NULL DEFAULT 1,
+    delivered   TINYINT       NOT NULL DEFAULT 0,
+    read_at     TIMESTAMP,
+    created_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_receiver_delivered_id ON message (receiver_id, delivered, id);
+CREATE INDEX idx_sender_id ON message (sender_id, id);
+CREATE INDEX idx_receiver_id ON message (receiver_id, id);

@@ -66,3 +66,37 @@ CREATE TABLE IF NOT EXISTS `leaderboard_stats` (
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci
   COMMENT = '排行榜统计表';
+
+CREATE TABLE IF NOT EXISTS `friendship` (
+    `id`         BIGINT   NOT NULL AUTO_INCREMENT COMMENT '主键（也作为好友申请ID）',
+    `user_id`    BIGINT   NOT NULL COMMENT '关系持有方用户ID（谁的好友/谁发出的申请）',
+    `friend_id`  BIGINT   NOT NULL COMMENT '关系对方用户ID',
+    `status`     TINYINT  NOT NULL DEFAULT 0 COMMENT '状态：0=PENDING 1=ACCEPTED',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                           ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_friend` (`user_id`, `friend_id`),
+    KEY `idx_friend_status` (`friend_id`, `status`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT = '好友关系表';
+
+CREATE TABLE IF NOT EXISTS `message` (
+    `id`          BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `sender_id`   BIGINT        NOT NULL COMMENT '发送者用户ID',
+    `receiver_id` BIGINT        NOT NULL COMMENT '接收者用户ID',
+    `content`     VARCHAR(2000) NOT NULL COMMENT '消息内容（文本）',
+    `type`        TINYINT       NOT NULL DEFAULT 1 COMMENT '消息类型：1=文本（预留 2=图片等）',
+    `delivered`   TINYINT       NOT NULL DEFAULT 0 COMMENT '送达状态：0=未送达(离线) 1=已送达',
+    `read_at`     DATETIME      DEFAULT NULL COMMENT '已读时间（预留字段，本阶段不做已读逻辑）',
+    `created_at`  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间（服务端时间）',
+    PRIMARY KEY (`id`),
+    KEY `idx_receiver_delivered_id` (`receiver_id`, `delivered`, `id`),
+    KEY `idx_sender_id` (`sender_id`, `id`),
+    KEY `idx_receiver_id` (`receiver_id`, `id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT = '聊天消息表';

@@ -9,6 +9,11 @@ public enum ErrorCode {
     PASSWORD_ERROR(1003, "密码错误"),
     ACTIVITY_NOT_FOUND(2001, "运动记录不存在"),
     ACTIVITY_FORBIDDEN(2002, "无权访问该运动记录"),
+    FRIEND_REQUEST_EXISTS(3001, "好友申请已存在或已是好友"),
+    FRIEND_REQUEST_NOT_FOUND(3002, "好友申请不存在"),
+    CANNOT_FRIEND_SELF(3003, "不能添加自己为好友"),
+    FRIEND_NOT_FOUND(3004, "对方不是你的好友"),
+    MESSAGE_CONTENT_INVALID(4001, "消息内容为空或超长"),
     INTERNAL_ERROR(500, "服务器内部错误");
 
     private final int code;

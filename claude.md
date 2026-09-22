@@ -59,6 +59,16 @@ Java 17, Spring Boot 3.2, MySQL 8, Redis 7, MyBatis-Plus, Spring Security + JWT,
 - 密码必须 BCrypt
 - 禁止提交密钥和真实配置
 
+## 设计决策：好友拒绝逻辑
+- 拒绝好友申请 = 删除 PENDING 记录，不保留 REJECTED 状态
+- 理由：语义干净、允许重发、避免唯一键冲突
+- 若将来需要「拒绝历史」或「黑名单」，单独建 user_block 表，不改 friendship
+
+## WebSocket 安全备注
+
+- WebSocket 握手鉴权：JWT 通过 URL query 参数 `?token=<jwt>` 传递（浏览器/Flutter WebSocket 无法自定义 Header）；`/ws/**` 在 Spring Security 中放行，鉴权由 `AuthHandshakeInterceptor` 完成，未登录连接会被拒绝。
+- 生产环境需在 Nginx 层关闭 `/ws` 路径的 query 参数日志（避免 token 泄入 access log），或改用 `Sec-WebSocket-Protocol` 头传递 token。
+
 ## 当前阶段
 
 第一阶段（MVP）：用户注册登录 + 专属 ID + 运动记录
