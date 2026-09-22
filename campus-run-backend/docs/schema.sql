@@ -49,3 +49,20 @@ CREATE TABLE IF NOT EXISTS `activity` (
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci
   COMMENT = '运动记录表';
+
+CREATE TABLE IF NOT EXISTS `leaderboard_stats` (
+    `id`              BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `user_id`         BIGINT      NOT NULL COMMENT '用户ID',
+    `scope`           VARCHAR(20) NOT NULL COMMENT '榜单维度：daily/weekly/rolling30d/monthly',
+    `period`          VARCHAR(20) NOT NULL COMMENT '周期标识：daily=yyyy-MM-dd，weekly=周一日期，monthly=yyyy-MM，rolling30d 恒为 CURRENT',
+    `type`            TINYINT     NOT NULL COMMENT '运动类型：1=跑步 2=骑行',
+    `distance_meters` INT         NOT NULL DEFAULT 0 COMMENT '累计距离（米）',
+    `created_at`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_scope_period_type` (`user_id`, `scope`, `period`, `type`),
+    KEY `idx_scope_period_type_distance` (`scope`, `period`, `type`, `distance_meters` DESC)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT = '排行榜统计表';

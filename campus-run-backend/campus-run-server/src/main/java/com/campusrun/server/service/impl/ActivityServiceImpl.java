@@ -14,6 +14,7 @@ import com.campusrun.server.entity.Activity;
 import com.campusrun.server.mapper.ActivityMapper;
 import com.campusrun.server.model.TrackPoint;
 import com.campusrun.server.service.ActivityService;
+import com.campusrun.server.service.LeaderboardService;
 import com.campusrun.server.util.GpsUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -38,10 +39,13 @@ public class ActivityServiceImpl implements ActivityService {
 
     private final ActivityMapper activityMapper;
     private final ObjectMapper objectMapper;
+    private final LeaderboardService leaderboardService;
 
-    public ActivityServiceImpl(ActivityMapper activityMapper, ObjectMapper objectMapper) {
+    public ActivityServiceImpl(ActivityMapper activityMapper, ObjectMapper objectMapper,
+                               LeaderboardService leaderboardService) {
         this.activityMapper = activityMapper;
         this.objectMapper = objectMapper;
+        this.leaderboardService = leaderboardService;
     }
 
     @Override
@@ -80,6 +84,8 @@ public class ActivityServiceImpl implements ActivityService {
         activity.setTrackJson(serializeTrack(track));
 
         activityMapper.insert(activity);
+
+        leaderboardService.recordActivity(userId, activity.getDistanceMeters(), activity.getStartTime(), activity.getType());
 
         return buildCreateResponse(activity, (int) durationSeconds);
     }

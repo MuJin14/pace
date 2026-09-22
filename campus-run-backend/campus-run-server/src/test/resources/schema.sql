@@ -33,3 +33,19 @@ CREATE TABLE activity (
     created_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+DROP TABLE IF EXISTS leaderboard_stats;
+
+CREATE TABLE leaderboard_stats (
+    id              BIGINT      NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id         BIGINT      NOT NULL,
+    scope           VARCHAR(20) NOT NULL,
+    period          VARCHAR(20) NOT NULL,
+    type            TINYINT     NOT NULL,
+    distance_meters INT         NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_user_scope_period_type UNIQUE (user_id, scope, period, type)
+);
+
+CREATE INDEX idx_scope_period_type_distance ON leaderboard_stats (scope, period, type, distance_meters);

@@ -187,3 +187,107 @@ GET /api/v1/activity/{id}
   }
 }
 ```
+
+---
+
+# 第三阶段 — 排行榜（Leaderboard）
+
+以下接口均需携带 `Authorization: Bearer <token>`。`scope` 与 `type` 为必填参数；`period` 缺省时服务端解析为当前周期（daily=今天、weekly=本周一、monthly=本月；rolling30d 恒为 `CURRENT`）。非法 `scope` / `type` / `period` 返回 `400`。
+
+## 7. 榜单分页查询
+
+```
+GET /api/v1/leaderboard
+```
+
+请求参数：
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| scope | string | 是 | - | 榜单维度：`daily` / `weekly` / `rolling30d` / `monthly` |
+| type | int | 是 | - | 运动类型：`1`=跑步 `2`=骑行 |
+| period | string | 否 | 当前周期 | 周期标识；`daily`/`weekly` 为 `yyyy-MM-dd`，`monthly` 为 `yyyy-MM`；`rolling30d` 忽略此参数 |
+| page | int | 否 | 1 | 页码 |
+| size | int | 否 | 20 | 每页条数，上限 100 |
+
+成功响应 `data` 字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| total | long | 榜单总人数 |
+| page | long | 当前页码 |
+| size | long | 每页条数 |
+| list | array | 榜单条目，按 `distanceMeters` 降序排列 |
+
+`list` 条目字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| rank | long | 名次（从 1 开始） |
+| userId | long | 用户 ID |
+| uniqueId | string | 专属 ID |
+| nickname | string | 昵称 |
+| avatarUrl | string | 头像地址，可为 null |
+| distanceMeters | int | 累计距离（米） |
+
+示例请求：
+
+```
+GET /api/v1/leaderboard?scope=daily&period=2026-09-22&type=1&page=1&size=20
+Authorization: Bearer <token>
+```
+
+示例响应：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": {
+    "total": 128, "page": 1, "size": 20,
+    "list": [
+      { "rank": 1, "userId": 3, "uniqueId": "CR-00000003", "nickname": "小明",
+        "avatarUrl": null, "distanceMeters": 15230 },
+      { "rank": 2, "userId": 9, "uniqueId": "CR-00000009", "nickname": "阿强",
+        "avatarUrl": null, "distanceMeters": 12100 }
+    ]
+  }
+}
+```
+
+## 8. 个人排名
+
+```
+GET /api/v1/leaderboard/my-rank
+```
+
+请求参数：
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| scope | string | 是 | - | 榜单维度：`daily` / `weekly` / `rolling30d` / `monthly` |
+| type | int | 是 | - | 运动类型：`1`=跑步 `2`=骑行 |
+| period | string | 否 | 当前周期 | 周期标识，含义同榜单查询 |
+
+成功响应 `data` 字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| rank | long | 当前用户名次（从 1 开始）；不在榜上时为 null |
+| distanceMeters | long | 当前用户累计距离（米）；不在榜上时为 0 |
+| total | long | 榜单总人数 |
+
+示例请求：
+
+```
+GET /api/v1/leaderboard/my-rank?scope=daily&period=2026-09-22&type=1
+Authorization: Bearer <token>
+```
+
+示例响应：
+
+```json
+{
+  "code": 0, "message": "成功",
+  "data": { "rank": 7, "distanceMeters": 5200, "total": 128 }
+}
+```
