@@ -11,15 +11,23 @@ import com.campusrun.server.dto.response.LoginResponse;
 import com.campusrun.server.dto.response.UserBriefResponse;
 import com.campusrun.server.entity.Friendship;
 import com.campusrun.server.enums.FriendshipStatus;
+import com.campusrun.server.event.FriendAcceptedEvent;
+import com.campusrun.server.event.FriendDeletedEvent;
+import com.campusrun.server.event.FriendRequestEvent;
 import com.campusrun.server.mapper.FriendshipMapper;
 import com.campusrun.server.service.AuthService;
 import com.campusrun.server.service.FriendService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.event.EventListener;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,6 +47,14 @@ class FriendServiceImplTest {
 
     @Autowired
     private FriendshipMapper friendshipMapper;
+
+    @Autowired
+    private FriendEventCapture events;
+
+    @BeforeEach
+    void resetEvents() {
+        events.clear();
+    }
 
     private LoginResponse registerUser(String phone, String nickname) {
         RegisterRequest req = new RegisterRequest();
@@ -244,5 +260,89 @@ class FriendServiceImplTest {
         BusinessException e = assertThrows(BusinessException.class,
                 () -> friendService.deleteFriend(a, b));
         assertEquals(ErrorCode.FRIEND_NOT_FOUND.getCode(), e.getCode());
+    }
+
+    @Test
+    void sendRequest_success_publishesFriendRequestEvent() {
+        Long a = registerUser("13910000133", "甲").getUserId();
+        Long b = registerUser("13910000134", "乙").getUserId();
+
+        friendService.sendRequest(a, b);
+
+        List<FriendRequestEvent> published = events.of(FriendRequestEvent.class);
+        assertEquals(1, published.size());
+        FriendRequestEvent event = published.get(0);
+        assertEquals(b, event.getTargetUserId());
+        assertEquals(a, event.getData().getFromUserId());
+        assertEquals("甲", event.getData().getFromNickname());
+    }
+
+    @Test
+    void acceptRequest_success_publishesFriendAcceptedEvent() {
+        Long a = registerUser("13910000135", "甲").getUserId();
+        Long b = registerUser("13910000136", "乙").getUserId();
+        friendService.sendRequest(a, b);
+        Long requestId = row(a, b).getId();
+
+        friendService.acceptRequest(b, requestId);
+
+        List<FriendAcceptedEvent> published = events.of(FriendAcceptedEvent.class);
+        assertEquals(1, published.size());
+        FriendAcceptedEvent event = published.get(0);
+        assertEquals(a, event.getTargetUserId());
+        assertEquals(b, event.getData().getFriendUserId());
+    }
+
+    @Test
+    void deleteFriend_success_publishesFriendDeletedEvent() {
+        Long a = registerUser("13910000137", "甲").getUserId();
+        Long b = registerUser("13910000138", "乙").getUserId();
+        makeFriends(a, b);
+
+        friendService.deleteFriend(a, b);
+
+        List<FriendDeletedEvent> published = events.of(FriendDeletedEvent.class);
+        assertEquals(1, published.size());
+        FriendDeletedEvent event = published.get(0);
+        assertEquals(b, event.getTargetUserId());
+        assertEquals(a, event.getData().getFriendUserId());
+    }
+
+    @TestConfiguration
+    static class FriendEventCaptureConfig {
+        @Bean
+        FriendEventCapture friendEventCapture() {
+            return new FriendEventCapture();
+        }
+    }
+
+    static class FriendEventCapture {
+        private final List<Object> captured = new ArrayList<>();
+
+        @EventListener
+        void onFriendRequest(FriendRequestEvent event) {
+            captured.add(event);
+        }
+
+        @EventListener
+        void onFriendAccepted(FriendAcceptedEvent event) {
+            captured.add(event);
+        }
+
+        @EventListener
+        void onFriendDeleted(FriendDeletedEvent event) {
+            captured.add(event);
+        }
+
+        void clear() {
+            captured.clear();
+        }
+
+        <T> List<T> of(Class<T> type) {
+            return captured.stream()
+                    .filter(type::isInstance)
+                    .map(type::cast)
+                    .toList();
+        }
     }
 }

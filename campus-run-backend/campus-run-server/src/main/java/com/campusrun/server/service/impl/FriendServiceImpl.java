@@ -7,15 +7,23 @@ import com.campusrun.common.result.PageResponse;
 import com.campusrun.server.dto.response.FriendItemResponse;
 import com.campusrun.server.dto.response.FriendRequestResponse;
 import com.campusrun.server.dto.response.UserBriefResponse;
+import com.campusrun.server.dto.websocket.FriendAcceptedPushData;
+import com.campusrun.server.dto.websocket.FriendDeletedPushData;
+import com.campusrun.server.dto.websocket.FriendRequestPushData;
 import com.campusrun.server.entity.Friendship;
 import com.campusrun.server.entity.User;
 import com.campusrun.server.enums.FriendshipStatus;
 import com.campusrun.server.mapper.FriendshipMapper;
 import com.campusrun.server.mapper.UserMapper;
+import com.campusrun.server.event.FriendAcceptedEvent;
+import com.campusrun.server.event.FriendDeletedEvent;
+import com.campusrun.server.event.FriendRequestEvent;
 import com.campusrun.server.service.FriendService;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -23,10 +31,13 @@ public class FriendServiceImpl implements FriendService {
 
     private final FriendshipMapper friendshipMapper;
     private final UserMapper userMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public FriendServiceImpl(FriendshipMapper friendshipMapper, UserMapper userMapper) {
+    public FriendServiceImpl(FriendshipMapper friendshipMapper, UserMapper userMapper,
+                            ApplicationEventPublisher eventPublisher) {
         this.friendshipMapper = friendshipMapper;
         this.userMapper = userMapper;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -74,6 +85,7 @@ public class FriendServiceImpl implements FriendService {
             reverse.setStatus(FriendshipStatus.ACCEPTED.getCode());
             friendshipMapper.updateById(reverse);
             insertAccepted(userId, targetUserId);
+            publishFriendAccepted(userId, targetUserId);
             return;
         }
 
@@ -82,6 +94,7 @@ public class FriendServiceImpl implements FriendService {
         request.setFriendId(targetUserId);
         request.setStatus(FriendshipStatus.PENDING.getCode());
         friendshipMapper.insert(request);
+        publishFriendRequest(request.getId(), userId, targetUserId);
     }
 
     @Override
@@ -105,6 +118,8 @@ public class FriendServiceImpl implements FriendService {
             reverse.setStatus(FriendshipStatus.ACCEPTED.getCode());
             friendshipMapper.updateById(reverse);
         }
+
+        publishFriendAccepted(userId, request.getUserId());
     }
 
     @Override
@@ -143,6 +158,36 @@ public class FriendServiceImpl implements FriendService {
         friendshipMapper.delete(new LambdaQueryWrapper<Friendship>()
                 .eq(Friendship::getUserId, friendId)
                 .eq(Friendship::getFriendId, userId));
+
+        publishFriendDeleted(userId, friendId);
+    }
+
+    private void publishFriendRequest(Long requestId, Long fromUserId, Long targetUserId) {
+        User from = userMapper.selectById(fromUserId);
+        FriendRequestPushData data = new FriendRequestPushData();
+        data.setRequestId(requestId);
+        data.setFromUserId(fromUserId);
+        data.setFromUniqueId(from.getUniqueId());
+        data.setFromNickname(from.getNickname());
+        data.setFromAvatarUrl(from.getAvatarUrl());
+        data.setCreatedAt(LocalDateTime.now());
+        eventPublisher.publishEvent(new FriendRequestEvent(targetUserId, data));
+    }
+
+    private void publishFriendAccepted(Long friendUserId, Long targetUserId) {
+        User me = userMapper.selectById(friendUserId);
+        FriendAcceptedPushData data = new FriendAcceptedPushData();
+        data.setFriendUserId(friendUserId);
+        data.setFriendUniqueId(me.getUniqueId());
+        data.setFriendNickname(me.getNickname());
+        data.setFriendAvatarUrl(me.getAvatarUrl());
+        eventPublisher.publishEvent(new FriendAcceptedEvent(targetUserId, data));
+    }
+
+    private void publishFriendDeleted(Long deletedByUserId, Long targetUserId) {
+        FriendDeletedPushData data = new FriendDeletedPushData();
+        data.setFriendUserId(deletedByUserId);
+        eventPublisher.publishEvent(new FriendDeletedEvent(targetUserId, data));
     }
 
     private void insertAccepted(Long userId, Long friendId) {
