@@ -6,6 +6,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/empty_state.dart';
+import '../../../core/widgets/scrollable_center.dart';
 import '../../../data/models/activity_summary.dart';
 import '../providers/activity_list_provider.dart';
 
@@ -29,22 +30,29 @@ class _ActivityListPageState extends ConsumerState<ActivityListPage> {
         children: [
           _FilterBar(selected: _type, onChanged: _onFilter),
           Expanded(
-            child: listAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (err, _) => _ErrorView(
-                message: err is ApiException ? err.message : '加载失败，请稍后重试',
-                onRetry: () => ref.invalidate(activityListProvider),
+            child: RefreshIndicator(
+              onRefresh: () => ref.read(activityListProvider.notifier).refresh(),
+              child: listAsync.when(
+                loading: () => const ScrollableCenter(child: CircularProgressIndicator()),
+                error: (err, _) => ScrollableCenter(
+                  child: _ErrorView(
+                    message: err is ApiException ? err.message : '加载失败，请稍后重试',
+                    onRetry: () => ref.invalidate(activityListProvider),
+                  ),
+                ),
+                data: (list) {
+                  if (list.isEmpty) {
+                    return const ScrollableCenter(
+                      child: EmptyState(
+                        icon: Icons.directions_run,
+                        title: '还没有运动记录',
+                        subtitle: '去首页开始你的第一次跑步或骑行吧',
+                      ),
+                    );
+                  }
+                  return _buildList(list);
+                },
               ),
-              data: (list) {
-                if (list.isEmpty) {
-                  return const EmptyState(
-                    icon: Icons.directions_run,
-                    title: '还没有运动记录',
-                    subtitle: '去首页开始你的第一次跑步或骑行吧',
-                  );
-                }
-                return _buildList(list);
-              },
             ),
           ),
         ],
@@ -60,37 +68,35 @@ class _ActivityListPageState extends ConsumerState<ActivityListPage> {
   Widget _buildList(List<ActivitySummary> list) {
     final loadingMore = ref.watch(activityLoadingMoreProvider);
     final hasMore = ref.read(activityListProvider.notifier).hasMore;
-    return RefreshIndicator(
-      onRefresh: () => ref.read(activityListProvider.notifier).refresh(),
-      child: NotificationListener<ScrollNotification>(
-        onNotification: (n) {
-          if (n.metrics.pixels >= n.metrics.maxScrollExtent - 200) {
-            ref.read(activityListProvider.notifier).loadMore();
-          }
-          return false;
-        },
-        child: ListView.separated(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-          itemCount: list.length + (hasMore ? 1 : 0),
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            if (index == list.length) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Center(
-                  child: loadingMore
-                      ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
-                      : const Text('上拉加载更多', style: TextStyle(fontSize: 13, color: AppColors.textHint)),
-                ),
-              );
-            }
-            final item = list[index];
-            return _ActivityCard(
-              item: item,
-              onTap: () => context.push('/activity/${item.activityId}'),
+    return NotificationListener<ScrollNotification>(
+      onNotification: (n) {
+        if (n.metrics.pixels >= n.metrics.maxScrollExtent - 200) {
+          ref.read(activityListProvider.notifier).loadMore();
+        }
+        return false;
+      },
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        itemCount: list.length + (hasMore ? 1 : 0),
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          if (index == list.length) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: loadingMore
+                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
+                    : const Text('上拉加载更多', style: TextStyle(fontSize: 13, color: AppColors.textHint)),
+              ),
             );
-          },
-        ),
+          }
+          final item = list[index];
+          return _ActivityCard(
+            item: item,
+            onTap: () => context.push('/activity/${item.activityId}'),
+          );
+        },
       ),
     );
   }

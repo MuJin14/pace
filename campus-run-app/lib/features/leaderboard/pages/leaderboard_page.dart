@@ -5,6 +5,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/empty_state.dart';
+import '../../../core/widgets/scrollable_center.dart';
 import '../../../core/widgets/user_avatar.dart';
 import '../../../data/models/leaderboard_entry.dart';
 import '../providers/leaderboard_provider.dart';
@@ -38,22 +39,32 @@ class _LeaderboardPageState extends ConsumerState<LeaderboardPage> {
           _ScopeBar(selected: _scope, onChanged: (s) => setState(() => _scope = s)),
           _TypeBar(selected: _type, onChanged: (t) => setState(() => _type = t)),
           Expanded(
-            child: listAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (err, _) => _ErrorView(
-                message: err is ApiException ? err.message : '加载失败，请稍后重试',
-                onRetry: () => ref.invalidate(leaderboardProvider((_scope, _type))),
-              ),
-              data: (list) {
-                if (list.isEmpty) {
-                  return const EmptyState(
-                    icon: Icons.emoji_events,
-                    title: '榜单暂无数据',
-                    subtitle: '去跑一跑，抢占第一名的位置吧',
-                  );
-                }
-                return _buildList(list);
+            child: RefreshIndicator(
+              onRefresh: () async {
+                ref.invalidate(leaderboardProvider((_scope, _type)));
+                await ref.read(leaderboardProvider((_scope, _type)).future);
               },
+              child: listAsync.when(
+                loading: () => const ScrollableCenter(child: CircularProgressIndicator()),
+                error: (err, _) => ScrollableCenter(
+                  child: _ErrorView(
+                    message: err is ApiException ? err.message : '加载失败，请稍后重试',
+                    onRetry: () => ref.invalidate(leaderboardProvider((_scope, _type))),
+                  ),
+                ),
+                data: (list) {
+                  if (list.isEmpty) {
+                    return const ScrollableCenter(
+                      child: EmptyState(
+                        icon: Icons.emoji_events,
+                        title: '榜单暂无数据',
+                        subtitle: '去跑一跑，抢占第一名的位置吧',
+                      ),
+                    );
+                  }
+                  return _buildList(list);
+                },
+              ),
             ),
           ),
         ],
@@ -62,22 +73,20 @@ class _LeaderboardPageState extends ConsumerState<LeaderboardPage> {
   }
 
   Widget _buildList(List<LeaderboardEntry> list) {
-    return RefreshIndicator(
-      onRefresh: () async => ref.invalidate(leaderboardProvider((_scope, _type))),
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        itemCount: list.length + 1,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
-        itemBuilder: (context, index) {
-          if (index == 0) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: _MyRankCard(scope: _scope, type: _type),
-            );
-          }
-          return _RankItem(entry: list[index - 1]);
-        },
-      ),
+    return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      itemCount: list.length + 1,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: _MyRankCard(scope: _scope, type: _type),
+          );
+        }
+        return _RankItem(entry: list[index - 1]);
+      },
     );
   }
 }

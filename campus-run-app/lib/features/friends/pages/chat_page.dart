@@ -9,6 +9,7 @@ import '../../../core/config/app_config.dart';
 import '../../../core/storage/token_storage.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/widgets/scrollable_center.dart';
 import '../../../data/models/chat_message.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../providers/message_provider.dart';
@@ -49,6 +50,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   Future<void> _loadHistory() async {
     try {
+      ref.invalidate(messageHistoryProvider(widget.friendId));
       final page = await ref.read(messageHistoryProvider(widget.friendId).future);
       // 后端按 messageId 倒序返回，转成旧→新用于展示。
       setState(() {
@@ -149,17 +151,21 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       body: Column(
         children: [
           Expanded(
-            child: _historyLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _messages.isEmpty
-                    ? const _EmptyChat()
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.all(16),
-                        itemCount: _messages.length,
-                        itemBuilder: (context, i) =>
-                            _Bubble(message: _messages[i], mine: _messages[i].senderId == _myId),
-                      ),
+            child: RefreshIndicator(
+              onRefresh: () async => _loadHistory(),
+              child: _historyLoading
+                  ? const ScrollableCenter(child: CircularProgressIndicator())
+                  : _messages.isEmpty
+                      ? const ScrollableCenter(child: _EmptyChat())
+                      : ListView.builder(
+                          controller: _scrollController,
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _messages.length,
+                          itemBuilder: (context, i) =>
+                              _Bubble(message: _messages[i], mine: _messages[i].senderId == _myId),
+                        ),
+            ),
           ),
           _InputBar(controller: _controller, onSend: _handleSend),
         ],

@@ -35,8 +35,13 @@ class FriendsPage extends ConsumerWidget {
         onRefresh: () async {
           ref.invalidate(friendListProvider);
           ref.invalidate(friendRequestsProvider);
+          await Future.wait([
+            ref.read(friendListProvider.future),
+            ref.read(friendRequestsProvider.future),
+          ]);
         },
         child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
           children: [
             _RequestsSection(async: requestsAsync),
