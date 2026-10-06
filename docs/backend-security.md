@@ -392,3 +392,125 @@ App 起一个常驻前台服务维持 WebSocket，让退到后台也能及时收
 
 以后遇到类似取舍，应该**先把代价摆出来问用户**，
 而不是做完再回退。
+
+
+## 红点延迟：消息到了，红点却要等一分钟（2026-10-06）
+
+### 现象
+
+好友发来消息，消息本身没问题，但**未读红点要过大约一分钟才出现**。
+观感很差 —— 像是「消息来了但 App 不知道」。
+
+### 根因：不是红点算错了，是「连接坏了没人发现」
+
+红点有三个来源（`app.dart` 的 `_handleIncomingMessage`、
+`unread_sync_provider.dart`）：
+
+| 来源 | 触发条件 |
+|---|---|
+| WebSocket 实时消息 | 连接**活着**时立刻 +1 |
+| 登录后同步 | 进入登录态 |
+| **回到前台同步** | `AppLifecycleState.resumed` |
+
+关键在这个链路里：
+**红点最终是靠「重连之后补拉未读数」出现的。** 所以问题不是红点逻辑，
+而是「连接什么时候被判定为断了」。
+
+而客户端在这一点上有两个结构性缺陷（当时不便发新版，故在服务端补偿）：
+
+**① 心跳只发不校验。** `global_ws_provider.dart` 的 `_startHeartbeat`
+每 25 秒发一次 `heartbeat`，但**从不检查有没有收到响应**。
+socket 半死时，写入本地缓冲区不会抛错 —— 客户端根本不知道连接已经废了。
+
+**② 回前台时只看「对象是否存在」。**
+
+```dart
+if (state == AppLifecycleState.resumed) {
+  if (_channel != null) {          // ← 只看对象，不检查连接死活
+    if (_heartbeat == null) _startHeartbeat();
+  } else { connect(); }            // ← 几乎永远走不到
+}
+```
+
+`_channel` 只在 `_teardown()` 里被置空，而 `_teardown()` 只在
+`onDone` / `onError` 时触发。半死连接不会触发它们 → **永远不重连**。
+
+**于是服务端成了唯一的「检测器」**：只有服务端的空闲回收（sweep）
+把僵尸会话清掉，客户端才会收到关闭通知、进而重连、补拉未读。
+
+### 原来的参数为什么那么慢
+
+```java
+// ChatSessionScheduler（改前）
+IDLE_TIMEOUT_MILLIS = 90_000L;      // 90 秒
+@Scheduled(fixedDelay = 60_000)     // 每 60 秒扫一次
+```
+
+最坏 150 秒、平均约 75 秒 —— 与用户说的「一分钟左右」完全吻合。
+
+### ⚠️ 还有一个隐藏问题：清理时没有真正关闭连接
+
+原来的 `WebSocketSessionManager.sweep` 只做了 `sessions.remove(...)`：
+
+```java
+// 改前
+session.close(CloseStatus.SESSION_NOT_RELIABLE);   // 有调用
+sessions.remove(userId, session);
+```
+
+看着有 close，但**只从 Map 移除**这个动作本身不会让客户端知道任何事。
+必须确保 close 真的被调用 —— 否则服务端「看起来清理干净了」，
+客户端那边 TCP 连接依旧挂着，也就不会重连。
+（`sendToUser` 是按 Map 查人投递的，移除后消息投不出去，
+客户端既收不到消息、也不知道要重连 —— 双重失联。）
+
+所以现在把它固化成测试：`sweep_mustCloseSessionSoClientLearnsToReconnect`。
+**这条测试在实现退化成「只 remove」时会失败**（已验证）。
+
+### 改后的参数
+
+```java
+IDLE_TIMEOUT_MILLIS = 45_000L;      // 45 秒
+SWEEP_INTERVAL_MILLIS = 15_000L;    // 每 15 秒扫一次
+```
+
+**为什么是 45 秒而不是更短**：客户端心跳间隔 25 秒，
+45/25 = **1.8 倍**，允许一次心跳丢失（网络抖动、系统调度延迟）
+而不会误杀健康连接。压到 25~30 秒会出现「心跳稍慢就被踢」，
+表现为**反复重连**（消息时断时续）—— 比慢一点更难查，
+因为现象看起来像网络问题。
+
+合起来：最坏 **60 秒**、平均约 37 秒，比原来快一半以上。
+
+### 这条路的极限（诚实说明）
+
+**纯服务端做不到「秒级」。** 要做到秒级必须改客户端，两条路：
+
+1. 心跳**校验响应**（收到 pong 才算活着），超时主动重连；
+2. 回前台时**无条件重建连接**，而不是看连接对象是否存在。
+
+这两条都在 `campus-run-app/lib/core/ws/global_ws_provider.dart`，
+需要发新版才能生效。
+
+### 启动日志（排查抓手）
+
+服务端启动时会打一行，用于确认参数是否生效：
+
+```
+WebSocket 空闲会话回收: 阈值 45s, 扫描间隔 15s (客户端心跳 25s, 倍数 1.8)
+```
+
+⚠️ 倍数**必须用浮点除法**。第一版用整数除法，45/25 打成了「倍数 1」——
+读日志的人会以为阈值等于心跳间隔（那就是配置错了）。
+已加测试 `startupLog_showsFractionalRatio` 锁住它。
+
+### 相关测试
+
+| 测试 | 守住什么 |
+|---|---|
+| `sweep_mustCloseSessionSoClientLearnsToReconnect` | 清理时必须真正 close，否则客户端不会重连 |
+| `sweep_leavesRecentlyActiveSessionAlone` | 刚有心跳的连接不能被误杀 |
+| `sweep_cleansSessionWithoutActivityRecord` | 状态不一致的会话也要清理 |
+| `idleTimeout_leavesRoomForOneMissedHeartbeat` | 阈值 ≥ 心跳间隔的 1.5 倍（防止反复重连） |
+| `worstCaseDetectionDelay_isWithinOneMinute` | 最坏检测延迟 ≤ 60 秒（防止参数被调回去） |
+| `startupLog_showsFractionalRatio` | 日志里的倍数是小数 |

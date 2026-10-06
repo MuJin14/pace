@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -83,6 +84,59 @@ class WebSocketSessionManagerTest {
 
         Thread.sleep(30);
         manager.sweep(1);
+
+        assertFalse(manager.isOnline(1L));
+    }
+
+    /**
+     * ⚠️ 这条是「红点延迟」问题的核心断言。
+     *
+     * <p>sweep 只从 Map 里删掉会话是不够的：客户端的 TCP 连接不会收到任何通知，
+     * 它不会重连，也就不会去补拉未读数 —— 表现就是「消息到了，红点很久才出现」。
+     *
+     * <p>必须先 {@code close()}，让客户端收到 onDone/onError 主动重连。
+     * 这个断言在实现退化成「只 remove」时会失败。
+     */
+    @Test
+    void sweep_mustCloseSessionSoClientLearnsToReconnect() throws Exception {
+        WebSocketSession session = openSession();
+        manager.addSession(1L, session);
+
+        Thread.sleep(30);
+        manager.sweep(1);
+
+        ArgumentCaptor<CloseStatus> status = ArgumentCaptor.forClass(CloseStatus.class);
+        verify(session).close(status.capture());
+        assertFalse(manager.isOnline(1L));
+    }
+
+    @Test
+    void sweep_leavesRecentlyActiveSessionAlone() throws Exception {
+        WebSocketSession session = openSession();
+        manager.addSession(1L, session);
+        manager.touch(1L);
+
+        // 阈值远大于「刚刚 touch 过」的时间差
+        manager.sweep(60_000);
+
+        assertTrue(manager.isOnline(1L), "刚有心跳的连接不能被杀掉");
+        verify(session, never()).close(any(CloseStatus.class));
+    }
+
+    /**
+     * 活跃时间缺失时也要清理。
+     *
+     * <p>正常情况下 {@code addSession} 会写入活跃时间；缺失说明状态已经不一致，
+     * 留着它只会让 {@code sendToUser} 以为用户在线（消息投进黑洞）。
+     */
+    @Test
+    void sweep_cleansSessionWithoutActivityRecord() throws Exception {
+        WebSocketSession session = openSession();
+        manager.addSession(1L, session);
+        // 人为制造「有会话但没有活跃记录」
+        manager.removeActivityForTest(1L);
+
+        manager.sweep(60_000);
 
         assertFalse(manager.isOnline(1L));
     }
