@@ -1,4 +1,4 @@
--- 校园跑（Campus Run）数据库初始化脚本
+-- 行迹（Xingji）数据库初始化脚本
 -- 第一阶段（MVP）：仅 user 表；activity / friendship / message 在后续阶段加入
 
 CREATE DATABASE IF NOT EXISTS campus_run

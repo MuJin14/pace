@@ -53,8 +53,18 @@ void main() {
       );
     });
 
-    test('未登录（myUserId=0）→ 不提醒', () {
-      expect(decideNotifyAction(ctx(myUserId: 0)), NotifyAction.none);
+    // ⚠️ 这条原来写的是 myUserId=0，**编码了一个错误的前提**：
+    // 迁移 006 之后 0 是合法用户 id（管理员），「未登录」必须用
+    // kUnknownUserId(-1) 表示。保留 0 会让 0 号用户收不到任何提醒 ——
+    // 那正是「消息到了但红点不亮」的根因。
+    test('未登录（kUnknownUserId）→ 不提醒', () {
+      expect(decideNotifyAction(ctx(myUserId: kUnknownUserId)),
+          NotifyAction.none);
+    });
+
+    test('⚠️ myUserId=0 是真实用户，必须正常提醒', () {
+      expect(decideNotifyAction(ctx(myUserId: 0)),
+          NotifyAction.vibrateAndNotify);
     });
   });
 
@@ -104,7 +114,8 @@ void main() {
 
     test('未登录优先于免打扰判断', () {
       expect(
-        decideNotifyAction(ctx(myUserId: 0, mutedFriendIds: {2})),
+        decideNotifyAction(
+            ctx(myUserId: kUnknownUserId, mutedFriendIds: {2})),
         NotifyAction.none,
       );
     });

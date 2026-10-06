@@ -15,7 +15,7 @@
   用 data: URI 是为了让 Worker 包不依赖额外文件（内联即可）。
 -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23FF8C42'/%3E%3Cstop offset='1' stop-color='%23F0653A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M17 46 C25 46 27 32 33 24 C36 20 40 17 45 25' stroke='white' stroke-width='6.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='17' cy='46' r='5.5' fill='%23FFE3D2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=2.0.1">
+<link rel="stylesheet" href="style.css?v=2.2.2">
 <!-- JS 可用标记：淡入等渐进增强样式只在此时生效，
      避免脚本没跑时内容被 opacity:0 永久隐藏。 -->
 <script>document.documentElement.classList.add("js");</script>
@@ -75,7 +75,7 @@
     <div class="hero-copy">
       <span class="pill">
         <span class="dot"></span>
-        已上线 · v<span id="ver">2.0.1</span>
+        已上线 · v<span id="ver">2.2.2</span>
       </span>
 
       <h1>
@@ -94,7 +94,7 @@
           <span>下载 Android 版</span>
         </a>
         <div class="cta-meta">
-          <span id="size">54.3 MB</span>
+          <span id="size">54.4 MB</span>
           <span class="sep">·</span>
           <span>Android 8.0+</span>
           <span class="sep">·</span>
@@ -113,7 +113,7 @@
         <div class="phone-notch"></div>
         <picture>
           <source srcset="shots/home.webp" type="image/webp">
-          <img src="shots/home.png?v=2.0.1" alt="行迹首页界面" loading="eager"
+          <img src="shots/home.png?v=2.2.2" alt="行迹首页界面" loading="eager"
                onerror="this.parentElement.classList.add('no-shot')">
         </picture>
       </div>
@@ -208,15 +208,15 @@
 
     <div class="shots">
       <figure class="shot">
-        <picture><source srcset="shots/home.webp" type="image/webp"><img src="shots/home.png?v=2.0.1" alt="首页" loading="lazy"></picture>
+        <picture><source srcset="shots/home.webp" type="image/webp"><img src="shots/home.png?v=2.2.2" alt="首页" loading="lazy"></picture>
         <figcaption>首页</figcaption>
       </figure>
       <figure class="shot shot-wide">
-        <picture><source srcset="shots/spec.webp" type="image/webp"><img src="shots/spec.png?v=2.0.1" alt="信息架构" loading="lazy"></picture>
+        <picture><source srcset="shots/spec.webp" type="image/webp"><img src="shots/spec.png?v=2.2.2" alt="信息架构" loading="lazy"></picture>
         <figcaption>信息架构</figcaption>
       </figure>
       <figure class="shot">
-        <picture><source srcset="shots/home-empty.webp" type="image/webp"><img src="shots/home-empty.png?v=2.0.1" alt="空状态" loading="lazy"></picture>
+        <picture><source srcset="shots/home-empty.webp" type="image/webp"><img src="shots/home-empty.png?v=2.2.2" alt="空状态" loading="lazy"></picture>
         <figcaption>空状态</figcaption>
       </figure>
     </div>
@@ -421,9 +421,9 @@
     <p>一次跑步大概二十分钟，比刷二十分钟手机值得。</p>
     <a class="btn btn-lg btn-invert" href="https://dl.hibiscus.wiki:8443/downloads/campus-run.apk">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>
-      下载 行迹 v<span id="ver2">2.0.1</span>
+      下载 行迹 v<span id="ver2">2.2.2</span>
     </a>
-    <p class="final-meta">Android 8.0+ · <span id="size2">54.3 MB</span> · 免费</p>
+    <p class="final-meta">Android 8.0+ · <span id="size2">54.4 MB</span> · 免费</p>
   </div>
 </section>
 
@@ -515,6 +515,8 @@
   setTimeout(showAll, 2000);
 })();
 </script>
+
+
 
 
 

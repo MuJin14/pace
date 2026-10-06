@@ -16,7 +16,7 @@
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>campus-run-backend</name>
-    <description>校园跑（Campus Run）后端父工程</description>
+    <description>行迹（Xingji）后端父工程</description>
 
     <properties>
         <java.version>17</java.version>

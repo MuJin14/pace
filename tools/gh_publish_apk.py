@@ -80,8 +80,8 @@ def main():
     # ── 1) 建 Release（已存在则复用）──
     code, rel = api("POST", "/repos/%s/releases" % repo, token, {
         "tag_name": tag,
-        "name": "校园跑 %s" % tag,
-        "body": "校园跑 App 安装包（Android）。\n\n"
+        "name": "行迹 %s" % tag,
+        "body": "行迹 App 安装包（Android）。\n\n"
                 "下载下方 `campus-run.apk` 直接安装即可。",
         "draft": False,
         "prerelease": False,

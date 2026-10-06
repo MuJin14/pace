@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 校园跑后端：一键部署（在 campus-run-backend/ 目录下执行）
+# 行迹后端：一键部署（在 campus-run-backend/ 目录下执行）
 #
 # 前置：
 #   1. 已执行 setup-server.sh

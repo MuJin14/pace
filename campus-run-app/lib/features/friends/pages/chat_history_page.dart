@@ -9,6 +9,7 @@ import '../../../core/widgets/scrollable_center.dart';
 import '../../../data/models/chat_message.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../providers/message_provider.dart';
+import '../utils/notify_policy.dart';
 
 /// 聊天记录（微信式：聊天页右上角「三个点 → 查看聊天记录」）。
 ///
@@ -28,7 +29,8 @@ class ChatHistoryPage extends ConsumerWidget {
     final async = ref.watch(messageHistoryProvider(friendId));
     // 判断「这条是我发的吗」需要当前用户 id；拿不到时按「对方」显示，
     // 只影响标签文案，不影响消息内容。
-    final myId = ref.watch(authProvider).value?.userId ?? 0;
+    // 同上：0 是合法 id，兜底必须用 kUnknownUserId。
+    final myId = ref.watch(authProvider).value?.userId ?? kUnknownUserId;
 
     return Scaffold(
       backgroundColor: AppColors.background,

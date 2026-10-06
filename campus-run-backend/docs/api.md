@@ -1,4 +1,4 @@
-# 校园跑（Campus Run）后端 API 文档 — 第一阶段
+# 行迹（Xingji）后端 API 文档 — 第一阶段
 
 统一返回体 `Result<T>`：
 

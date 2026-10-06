@@ -1,4 +1,4 @@
-# 「校园跑 Campus Run」UI 视觉质量评估报告（视觉 QA）
+# 「行迹 Xingji」UI 视觉质量评估报告（视觉 QA）
 
 > 评估范围：`campus-run-app`（Flutter / Riverpod 3）。设计系统 token 在 `lib/core/theme/`，共享组件在 `lib/core/widgets/`。
 > 评估方式：计划用 golden 渲染 30 张 PNG 后逐张目视；**本机沙箱阻止了 `flutter test` 执行**，因此本报告结论来自

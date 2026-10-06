@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 校园跑后端：服务器环境准备脚本（Ubuntu 22.04 / 24.04）
+# 行迹后端：服务器环境准备脚本（Ubuntu 22.04 / 24.04）
 #
 # 用法（在服务器上执行）：
 #   bash setup-server.sh

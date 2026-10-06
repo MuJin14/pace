@@ -296,7 +296,9 @@ class _AppState extends ConsumerState<App> {
     ref.watch(unreadSyncProvider);
     ref.listen(wsMessageStreamProvider, (_, next) {
       final ws = next.value;
-      if (ws != null) _handleWsMessage(ref, ws);
+      if (ws != null) {
+        _handleWsMessage(ref, ws);
+      }
     });
 
     _router = ref.watch(routerProvider);
@@ -336,6 +338,8 @@ class _AppState extends ConsumerState<App> {
 }
 
 void _handleWsMessage(WidgetRef ref, WsMessage ws) {
+  // 诊断：确认 WS 事件真的走到了根处理器。
+  // ignore: avoid_print
   switch (ws.type) {
     case WsEventType.friendRequest:
       ref.invalidate(friendRequestsProvider);
@@ -356,25 +360,71 @@ void _handleWsMessage(WidgetRef ref, WsMessage ws) {
 
 /// 处理收到的聊天消息：红点 +（按策略）震动与系统通知。
 ///
-/// 「该不该提醒」全部交给 [decideNotifyAction] 纯函数判断，
-/// 这里只负责取上下文快照与执行动作。
+/// ## 红点规则（用户定的，也是更稳的那一套）
 ///
-/// ⚠️ 旧实现只在「不在该会话」时加红点，且**只在 App 前台**才有机会执行
-/// （WebSocket 断开时收不到）。现在多了一层系统通知，所以判断必须更完整：
-/// 自己发的消息不能提醒、免打扰要静默。
+/// > **只在你点进会话之后红点才消失；否则一来新消息就显示红点。**
+///
+/// 也就是说红点只由两件事决定：
+///   1. 来了新消息 → 立刻 +1；
+///   2. 你点进了那个会话 → 清零。
+///
+/// ### 为什么不再用「是不是正在看这个会话」来决定红点
+///
+/// 原来加完红点后会再判一次 `action == none`（= 正在看这个会话）把它清掉。
+/// 那样红点是否显示，取决于 `currentChatFriendId` 这个状态**准不准** ——
+/// 而它恰恰出过问题：只在进入会话时被 set，从来没被清空，于是
+/// App 会一直以为你还在看那个会话，之后所有消息的红点都被立刻清掉。
+///
+/// 现在红点不再依赖那个状态：
+///   · 「正在看这个会话」的判定**只用于是否弹通知/震动**，不影响红点；
+///   · 红点清零只发生在「真的点进去了」（chat_page 的 initState 调 clearFriend）。
+///
+/// 顺带的好处是语义更直白：红点表示「这条你还没看」，
+/// 而不是「App 觉得你可能没看」。
+///
+/// ### 自己发的消息
+///
+/// 多端登录时自己发的消息会同步回来，不加红点也不提醒 ——
+/// 这条仍然保留（否则会在自己手机上给自己弹通知）。
 void _handleIncomingMessage(WidgetRef ref, WsMessage ws) {
   final data = ws.data;
+  // ignore: avoid_print
   if (data == null) return;
 
   final senderId = (data['senderId'] as num?)?.toInt();
+  // ignore: avoid_print
   if (senderId == null) return;
 
   // 上下文快照：全部取「此刻」的值，之后不再读 provider ——
   // 否则异步动作期间用户切了页面，判断会与实际状态不一致。
-  final myUserId = ref.read(authProvider).value?.userId ?? 0;
+  //
+  // ⚠️⚠️ 这里读的是**整个 auth 值**，不是只取 userId —— 因为要区分
+  // 「尚未取到登录用户」与「登录用户就是 0 号」。
+  //
+  // 曾经写成 `.userId ?? 0` 再判 `myUserId == 0` 当「未登录」，
+  // 那是**基于「id 从 1 开始」的错误前提**。迁移 006 把管理员重排为
+  // id 0/1/2 之后，0 号用户（Mujin）收到的每条实时消息都被
+  // 当成「未登录」而**静默丢弃** —— 红点不亮、通知不弹，
+  // 且只在这一个人的手机上表现为故障。这就是「消息能收到但红点不亮」的根因。
+  final authValue = ref.read(authProvider).value;
   final currentChat = ref.read(currentChatFriendIdProvider);
   final muted = ref.read(mutedFriendIdsProvider).value ?? const <int>{};
 
+  // 真的还没登录（或登录态尚未加载完）：没有「我的账号」，不处理。
+  if (authValue == null) return;
+  final myUserId = authValue.userId;
+
+  // 自己发的消息（多端登录时会同步回来）：不提醒、也不加红点。
+  if (senderId == myUserId) return;
+
+  // ── 红点：无条件加 ────────────────────────────────────────────
+  //
+  // 必须在「正在看这个会话」的判断**之前**无条件加，不能因为
+  // action == none 就跳过 —— 否则就又回到「依赖 currentChat 準不准」的老路。
+  // 真正清零的责任在 chat_page：点进会话时调 clearFriend。
+  ref.read(friendBadgeProvider.notifier).markMessage(friendId: senderId);
+
+  // ── 提醒方式：这里才用「是不是正在看这个会话」 ──────────────────
   final action = decideNotifyAction(NotifyContext(
     senderId: senderId,
     myUserId: myUserId,
@@ -383,18 +433,10 @@ void _handleIncomingMessage(WidgetRef ref, WsMessage ws) {
     appInForeground: true,
   ));
 
-  // 自己发的消息（多端登录时会同步回来）：不提醒、也不加红点
-  if (action == NotifyAction.none && senderId == myUserId) return;
-
-  // 红点：只要不是「自己发的」就加。
-  // 必须带上发送方 id —— 社区页要在**具体那一行**显示红点，
-  // 只记一个布尔值的话用户还是不知道是谁发的（要挨个点开）。
-  ref.read(friendBadgeProvider.notifier).markMessage(friendId: senderId);
-
   if (action == NotifyAction.none) {
-    // 正在看这个会话：消息已经在眼前，把该好友的红点清掉，
-    // 同时清掉可能残留的系统通知。
-    ref.read(friendBadgeProvider.notifier).clearFriend(senderId);
+    // 正在看这个会话：消息已经在眼前，不再弹通知/震动。
+    // ⚠️ 但**不**清红点 —— 用户可能马上就要退出这个会话，
+    // 那时红点应当还在（下次点进来才清）。
     ChatNotificationService.instance.cancelFor(senderId);
     return;
   }

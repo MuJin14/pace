@@ -24,6 +24,7 @@ import '../providers/message_provider.dart';
 import '../services/chat_notification_service.dart';
 import '../utils/chat_time_grouping.dart';
 import '../utils/emoji_catalog.dart';
+import '../utils/notify_policy.dart';
 
 /// 一对一聊天页：加载历史 + 订阅全局 WebSocket 实时收发。
 ///
@@ -125,7 +126,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   /// **只用于事件回调**（如乐观消息的 senderId）—— 那里读取即时值是正确的。
   /// **渲染路径不要用它**：`ref.read` 不订阅登录态，首帧会拿到 0，
   /// 导致消息归属判断失真。渲染请用 `build()` 里 `ref.watch` 得到的 myId。
-  int get _currentUserId => ref.read(authProvider).value?.userId ?? 0;
+  // ⚠️ 兜底值用 -1（未知），**不用 0** —— 0 是合法用户 id（管理员）。
+  // 用 0 兜底会让 0 号用户把自己的消息看成「别人发的」、或反之。
+  int get _currentUserId =>
+      ref.read(authProvider).value?.userId ?? kUnknownUserId;
 
   @override
   void initState() {
@@ -413,12 +417,47 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   @override
   void dispose() {
     _sub?.cancel();
-    // 刻意**不**在这里写 currentChatFriendIdProvider。
-    // 原因：dispose 处于 widget 卸载周期，Riverpod 3 既不允许用 ref（BuildContext 已失效），
-    // 也不允许写 provider；推迟到 post-frame / microtask 又会在 ProviderScope 已拆掉时抛
-    // UnmountedRefException。因此「谁在聊天页」的清理改由 app.dart 的消息处理器负责
-    // （见 app.dart 的 message 分支：先比对 senderId，再决定是否计入未读红点）。
-    // 这里只保证本页自己的资源被释放。
+    // ⚠️⚠️ 「离开这个会话」必须在这里明确登记。
+    //
+    // 这条曾经是**注释承诺、代码缺失**，并因此造成了一个很难发现的 bug：
+    //
+    //   原文写着「清理改由 app.dart 的消息处理器负责」——
+    //   但 app.dart 里根本没有那个逻辑。于是
+    //   `currentChatFriendIdProvider` **只在进入聊天页时被 set，
+    //   从来没有被清空过**。
+    //
+    //   后果：一旦打开过和某人的会话，App 就永远认为你还在看那个会话。
+    //   之后 ta 发来的每条消息都被 decideNotifyAction 判为
+    //   「正在看这个会话」→ 先加红点、随即立刻清掉 →
+    //   **红点永远不亮**；而用户「点进去又能看到消息」（服务端数据是对的）。
+    //
+    //   表现极具误导性：看起来像「消息没收到」，真因却相反
+    //   （收到了，但被当成已读吞掉了）。
+    //
+    // 为什么可以在这里调 ref：dispose 不在构建阶段，`ref.read` 是合法的；
+    // initState 里用 Future.microtask 是因为那里处在构建阶段，两者不矛盾。
+    // 用 clearIf 而不是 clear：万一用户已经进了另一个会话（快速切换），
+    // 不能把新的会话标记误清掉。
+    try {
+      // ⚠️ 退出会话时**也要清红点**。
+      //
+      // 与 initState 里那次是两件事，缺一不可：
+      //   · initState：进来时清掉「之前积累的」未读；
+      //   · dispose  ：把「在这个会话里新收到的」也一并清掉 ——
+      //     因为这些消息用户都已经看过了。
+      //
+      // 不做这一步的话：用户看完消息返回列表，那一行还挂着红点，
+      // 看起来像「还有没读的」，实际是刚读过的。而红点一旦留在那里，
+      // 下次有新消息会更加看不出来。
+      ref.read(friendBadgeProvider.notifier).clearFriend(widget.friendId);
+      // 「当前正在看的会话」标记同样要清：不清的话 App 会一直以为
+      // 你还在看这个会话，之后该好友的消息会被判成「已在眼前」而不弹通知。
+      ref.read(currentChatFriendIdProvider.notifier).clearIf(widget.friendId);
+    } catch (e) {
+      // 极端情况（ProviderScope 已拆）下清理会失败。不能因为清理失败就崩溃，
+      // 但要留痕 —— 它会导致「该好友的红点清不掉」或「之后不弹通知」。
+      debugPrint('[聊天] 退出会话时清理失败: $e');
+    }
     _controller.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();
@@ -493,7 +532,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     //  1. 订阅会在登录态解析完成后触发重建，消息归属才能拿到正确的 userId；
     //     ref.read 只读一次、不订阅，首帧 userId 为 null → 所有消息被判为「收到的」。
     //  2. 同设备切换账号时会重新构建，归属随之翻转。
-    final myId = ref.watch(authProvider).value?.userId ?? 0;
+    // 同上：0 是合法 id，兜底必须用 kUnknownUserId。
+    final myId = ref.watch(authProvider).value?.userId ?? kUnknownUserId;
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,

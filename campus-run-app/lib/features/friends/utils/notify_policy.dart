@@ -36,6 +36,22 @@ class NotifyContext {
   final bool appInForeground;
 }
 
+/// 未知发送方的占位 key。
+///
+/// ⚠️ **不能再用 0 当「未登录/未知」哨兵**。
+///
+/// 历史上这里写过 `if (ctx.myUserId == 0) return NotifyAction.none;`
+/// （「未登录不提醒」），当时是对的 —— 因为用户 id 从 1 开始，0 不可能是真人。
+///
+/// 但迁移 006 把管理员重排成了 id 0/1/2，**0 变成了合法用户 id**。
+/// 于是那条判断对 0 号用户恒成立：
+///   · 他收到的每条实时消息都被判成「未登录」→ 直接丢弃 →
+///     **红点永远不亮、通知永远不弹**；
+///   · 而且不报错、日志安静，只有站在他手机上才看得出来。
+///
+/// 现在用 -1 表示「未知/未登录」：用户 id 恒为非负，不可能撞上。
+const int kUnknownUserId = -1;
+
 /// 提醒方式（按强度递增）。
 enum NotifyAction {
   /// 完全不提醒（连红点也不必额外处理 —— 红点由未读数统一驱动）。
@@ -62,8 +78,12 @@ NotifyAction decideNotifyAction(NotifyContext ctx) {
   // 1. 自己发的（多端同步场景）
   if (ctx.senderId == ctx.myUserId) return NotifyAction.none;
 
-  // 2. 未登录：没有「我的账号」可言，不提醒
-  if (ctx.myUserId == 0) return NotifyAction.none;
+  // 2. 未登录：没有「我的账号」可言，不提醒。
+  //
+  // ⚠️ 判据是 kUnknownUserId（-1），**不是 0** ——
+  // 0 是合法用户 id（管理员），用 0 会让 0 号用户收不到任何提醒。
+  // 详见 [kUnknownUserId] 的说明。
+  if (ctx.myUserId == kUnknownUserId) return NotifyAction.none;
 
   // 3. 正在看这个会话
   if (ctx.currentChatFriendId != null &&

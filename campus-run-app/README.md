@@ -1,4 +1,4 @@
-# 校园跑 Campus Run · Flutter 客户端（`campus_run_app`）
+# 行迹 Xingji · Flutter 客户端（`campus_run_app`）
 
 面向高校学生的运动记录与社交 App 客户端：跑步/骑行轨迹记录、排行榜、好友聊天、运动目标与勋章、
 校园围栏防作弊。后端为仓库同级目录下的 `campus-run-backend`（Spring Boot）。

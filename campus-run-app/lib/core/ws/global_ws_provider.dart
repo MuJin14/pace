@@ -37,13 +37,60 @@ final wsMessageStreamProvider = StreamProvider<WsMessage>((ref) {
 
 class GlobalWsNotifier extends Notifier<GlobalWsStatus>
     with WidgetsBindingObserver {
+  /// 心跳间隔。
+  ///
+  /// ⚠️ 这个值与服务端的空闲回收阈值（`ChatSessionScheduler`，当前 45 秒）
+  /// **是耦合的**：服务端只要超过阈值没收到任何消息就会认为连接已死。
+  /// 改这里必须同步看那边，倍率保持在 1.5 以上，否则会出现
+  /// 「心跳稍慢就被服务端踢掉」→ 反复重连。
+  static const Duration _heartbeatInterval = Duration(seconds: 15);
+
+  /// 发出心跳后，等待 pong 的最长时间。
+  ///
+  /// 超过这个时间还没等到 pong，就判定连接已死并主动重连。
+  ///
+  /// ## 为什么必须有这个判断（真实故障）
+  ///
+  /// 原来的心跳**只发不校验**：每 25 秒往 socket 里写一帧就完事，
+  /// 从不检查有没有回音。而 socket 半死时（对端消失、NAT 超时、
+  /// 运营商回收），写入本地缓冲区**不会抛错** ——
+  /// 于是 App 以为自己还连着，实际上什么也收不到。
+  ///
+  /// 表现就是：好友发了消息，红点要过一分多钟才出现
+  /// （因为恢复完全依赖服务端把僵尸连接踢掉）。
+  ///
+  /// 现在只要一次心跳没有应答就重连，把「发现」的主动权拿回客户端。
+  static const Duration _pongTimeout = Duration(seconds: 8);
+
+  /// 判定「该连接已死」的检查周期（比 pong 超时更细，以便及时响应）。
+  static const Duration _livenessCheckInterval = Duration(seconds: 3);
+
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
   Timer? _heartbeat;
+  Timer? _liveness;
   Timer? _reconnect;
   int _attempt = 0;
   bool _manualClose = false;
   bool _connecting = false;
+
+  /// 发出心跳的时刻；收到 pong 后清空。
+  ///
+  /// null 表示「当前没有待应答的心跳」。
+  DateTime? _awaitingPongSince;
+
+  /// 测试用的地址覆盖。
+  ///
+  /// 测试要验证的是**连接管理逻辑**（心跳、活性判定、重连），
+  /// 而这些只有连一条真实的 socket 才有意义。真连生产地址当然不行，
+  /// 所以留一个出口让测试指向本地起的假服务端。
+  ///
+  /// ⚠️ 与 `ExternalLink.debugForceSupported` 同一套路：
+  /// 显式开关，而不是靠 `Platform.isAndroid` 之类的环境判断 ——
+  /// 那种判断在测试里恒为 false，会让测试**永远走不到真实分支**
+  /// （版本号读取上踩过这个坑）。
+  @visibleForTesting
+  static String? debugUrlOverride;
 
   /// 是否应该在后台**停止重连**。
   ///
@@ -131,8 +178,20 @@ class GlobalWsNotifier extends Notifier<GlobalWsStatus>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // ⚠️ 回前台时**不能**只看「连接对象是否存在」。
+      //
+      // 原来的写法是 `if (_channel != null) { ... } else { connect(); }`，
+      // 而 `_channel` 只在 `_teardown()` 里被置空 —— 后者只在
+      // `onDone` / `onError` 时才触发。半死连接不会触发它们，
+      // 于是这个分支**几乎永远走不到**，App 带着一条死连接回到前台，
+      // 消息和红点都要等服务端把连接踢掉才恢复。
+      //
+      // 现在改成：立即发一次心跳做**活性探测**。
+      // 收不到 pong 就由 [_liveness] 判定为死连接并重建 ——
+      // 这样回前台最多 8 秒就能恢复，而不是原来的 75~150 秒。
       if (_channel != null) {
         if (_heartbeat == null) _startHeartbeat();
+        _probeLivenessNow();
       } else if (!_manualClose && ref.read(authProvider).value != null) {
         _reconnect?.cancel();
         _reconnect = null;
@@ -154,6 +213,14 @@ class GlobalWsNotifier extends Notifier<GlobalWsStatus>
     }
   }
 
+  /// 立刻发一次心跳，并把连接标记为「待应答」。
+  ///
+  /// 回前台时调用：不等下一个心跳周期，马上确认这条连接是否还活着。
+  void _probeLivenessNow() {
+    _awaitingPongSince = DateTime.now();
+    _sendEnvelope({'type': 'heartbeat'});
+  }
+
   // ── 连接管理 ────────────────────────────────────────────────
   Future<void> connect() async {
     if (_channel != null && state == GlobalWsStatus.connected) return;
@@ -171,9 +238,14 @@ class GlobalWsNotifier extends Notifier<GlobalWsStatus>
       }
 
       state = GlobalWsStatus.connecting;
-      final ws = AppConfig.baseUrl
-          .replaceFirst('https://', 'wss://')
-          .replaceFirst('http://', 'ws://');
+      // 新连接尚未收到任何数据 —— 重置标记，
+      // 否则「上一次连接活过」会让这一次的失败重试也走「立刻重连」，
+      // 退避又失效了。
+      _everDelivered = false;
+      final ws = debugUrlOverride ??
+          AppConfig.baseUrl
+              .replaceFirst('https://', 'wss://')
+              .replaceFirst('http://', 'ws://');
       final channel = WebSocketChannel.connect(Uri.parse('$ws/ws?token=$token'));
       _channel = channel;
       _sub = channel.stream.listen(
@@ -203,6 +275,9 @@ class GlobalWsNotifier extends Notifier<GlobalWsStatus>
     _reconnect = null;
     _heartbeat?.cancel();
     _heartbeat = null;
+    _liveness?.cancel();
+    _liveness = null;
+    _awaitingPongSince = null;
     _sub?.cancel();
     _sub = null;
     try {
@@ -213,6 +288,21 @@ class GlobalWsNotifier extends Notifier<GlobalWsStatus>
   }
 
   void _onUnexpectedClose() {
+    // ⚠️⚠️ 只在「这条连接**确实通过数据**」时才重置退避。
+    //
+    // 这里的坑：`_onUnexpectedClose` 既是「已连上的连接断掉了」的入口，
+    // 也是「连接失败」的入口 —— 两者混在一起，无条件 `_attempt = 0`
+    // 会让失败重试永远停在 1 秒一次：断网期间每 1 秒重连一次，
+    // **指数退避完全失效**，网络恢复的瞬间还可能形成重连风暴。
+    //
+    // 正确的区分方式不是看「为什么断」，而是看「它有没有真的活过」：
+    //   · 活过（收到过数据）→ 是意外掉线，要**尽快**恢复，重置退避；
+    //   · 没活过（一直失败）→ 是连不上，要**退避**，别给服务端添压。
+    //
+    // 真机上验证过：关掉移动数据后，日志里反复出现
+    // `Unhandled Exception: SocketException: Failed host lookup`，
+    // 每次都走这里 —— 就是无条件重置退避造成的。
+    if (_everDelivered) _attempt = 0;
     _teardown();
     state = GlobalWsStatus.disconnected;
     if (!_manualClose) _scheduleReconnect();
@@ -229,24 +319,82 @@ class GlobalWsNotifier extends Notifier<GlobalWsStatus>
   }
 
   int _nextBackoffSeconds() {
-    final exp = _attempt;
+    final sec = backoffSecondsFor(_attempt);
     _attempt = _attempt + 1;
-    final v = 1 << exp; // 1 / 2 / 4 / 8 / 16 / 32…
+    return sec;
+  }
+
+  /// 第 [attempt] 次重连应等待的秒数：1 / 2 / 4 / 8 / 16 / 30（上限 30）。
+  ///
+  /// 抽成静态纯函数是为了能直接测 —— 退避曲线只看代码不容易判断对错，
+  /// 而它出问题时的现象（「断线后要等很久才恢复」）很容易被误判成网络问题。
+  @visibleForTesting
+  static int backoffSecondsFor(int attempt) {
+    final v = 1 << (attempt < 0 ? 0 : attempt);
     return v > 30 ? 30 : v;
   }
 
   void _startHeartbeat() {
     _heartbeat?.cancel();
-    _heartbeat = Timer.periodic(const Duration(seconds: 25), (_) {
+    _heartbeat = Timer.periodic(_heartbeatInterval, (_) {
+      _heartbeatTicks++;
+      // 上一轮的心跳还没等到 pong：说明这条连接已经不中用了。
+      // 直接重建，不要再往上叠新的心跳。
+      if (_awaitingPongSince != null) {
+        _onUnexpectedClose();
+        return;
+      }
+      _awaitingPongSince = DateTime.now();
       _sendEnvelope({'type': 'heartbeat'});
     });
+
+    // 活性看门狗：比心跳更频繁地检查「待应答」是否已超时。
+    //
+    // ⚠️ 必须独立于心跳定时器：只用「下次心跳时才发现」的话，
+    // 发现延迟会叠加上一整个心跳周期（15 秒），而这里 3 秒一查，
+    // 判定精度由 [_pongTimeout] 决定。
+    _liveness?.cancel();
+    _liveness = Timer.periodic(_livenessCheckInterval, (_) {
+      final since = _awaitingPongSince;
+      if (since == null) return;
+      if (DateTime.now().difference(since) <= _pongTimeout) return;
+      debugPrint('[WS] 心跳无应答超过 ${_pongTimeout.inSeconds} 秒，判定连接已死，重建');
+      _onUnexpectedClose();
+    });
   }
+
+  /// 是否正在等 pong。测试用。
+  @visibleForTesting
+  bool get awaitingPong => _awaitingPongSince != null;
+
+  /// 心跳是否在跑（定时器活着）。测试用 ——
+  /// 「发出去了但定时器没跑」和「定时器跑了但发不出去」是两种完全不同的故障。
+  @visibleForTesting
+  bool get heartbeatActive => _heartbeat?.isActive ?? false;
+
+  /// 已发出/已尝试的心跳次数。测试用。
+  @visibleForTesting
+  int get heartbeatTicks => _heartbeatTicks;
+  int _heartbeatTicks = 0;
+
+  /// 当前这条连接是否**真的收到过数据**。
+  ///
+  /// 用来区分两种「断开」：连上之后掉线（要立刻重连），
+  /// 和压根连不上（要退避）。见 [_onUnexpectedClose]。
+  bool _everDelivered = false;
 
   // ── 收发 ────────────────────────────────────────────────────
   void _onData(dynamic raw) {
     final text = raw is String ? raw : raw.toString();
     final ws = WsMessage.tryParse(text);
     if (ws == null) return;
+    // 收到任何一帧都说明这条连接是活的 —— 不局限于 pong。
+    // 消息本身就在流动时，没必要因为 pong 被延迟而误判为死连接。
+    //
+    // 同时记下「这条连接确实活过」：它决定断开后是立刻重连还是退避
+    // （见 _onUnexpectedClose）。
+    _everDelivered = true;
+    _awaitingPongSince = null;
     if (ws.type == WsEventType.ack || ws.type == WsEventType.error) {
       _settlePending(ws);
     }

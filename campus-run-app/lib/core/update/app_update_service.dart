@@ -170,6 +170,94 @@ class AppUpdateService {
     return digest.events.single.toString();
   }
 
+  /// 校验刚下载完的安装包是否完整。返回 null 表示通过。
+  ///
+  /// ## 为什么必须有这一步（真实故障，且反复出现）
+  ///
+  /// 用户多次遇到「解析安装包时出现问题」。根因就在下载之后：
+  ///
+  /// ```dart
+  /// await _dio.download(url, savePath, ...);   // 成功 ≠ 文件完整
+  /// _install(savePath);                         // 直接把可能残缺的包交给安装器
+  /// ```
+  ///
+  /// `Dio.download()` 在连接被中断/响应提前结束时**仍可能正常返回**，
+  /// 留下一个尾部缺失的 APK。而 APK 就是 zip，**尾部恰好是中央目录**
+  /// （记录每个条目的偏移）：少几十字节，安装器直接报解析失败。
+  ///
+  /// 这个错误极具误导性：看起来像「包本身有问题/手机不兼容」，
+  /// 而重下一次往往就好了 —— 用户只会认为「这 App 装不上」。
+  ///
+  /// 检查三层，任一层不过即判为残包：
+  ///   1. **sha256**：服务端给了就用，最严格，能发现任何字节级差异；
+  ///   2. **大小**：服务端给了字节数就比大小（1 的退路）；
+  ///   3. **zip 尾部签名**：两者都没有时的兜底 —— 直接看文件尾有没有
+  ///      `PK\x05\x06`（End of Central Directory），这是「zip 是否被截断」
+  ///      最直接的判据。
+  Future<String?> _verifyDownloaded(String path, AppVersionInfo info) async {
+    final f = File(path);
+    if (!await f.exists()) return '安装包下载失败：文件不存在，请重试。';
+
+    final length = await f.length();
+    if (length == 0) return '安装包下载失败：文件是空的，请重试。';
+
+    // 1) sha256
+    final expectedHash = info.apkSha256;
+    if (expectedHash != null && expectedHash.isNotEmpty) {
+      final actual = await _sha256Of(f);
+      if (actual != expectedHash) {
+        return '安装包下载不完整（校验值不符），已自动清理，请重新下载。';
+      }
+      return null; // 哈希一致即足够，不必再看 zip 尾部
+    }
+
+    // 2) 大小
+    final expectedSize = info.apkSizeBytes;
+    if (expectedSize != null && expectedSize > 0 && length != expectedSize) {
+      return '安装包下载不完整（应为 $expectedSize 字节，实际 $length 字节），'
+          '已自动清理，请重新下载。';
+    }
+    if (expectedSize != null && expectedSize > 0) return null;
+
+    // 3) zip 尾部兜底
+    if (!await _looksLikeCompleteZip(f, length)) {
+      return '安装包下载不完整（文件尾部缺失），已自动清理，请重新下载。';
+    }
+    return null;
+  }
+
+  /// 文件尾部是否带 zip 的「中央目录结束标记」`PK\x05\x06`。
+  ///
+  /// 为什么看尾部就够了：zip 的所有条目索引都在末尾那个记录里，
+  /// 一旦传输被截断，最先丢的正是它。读尾部 64KB（注释理论上可更长，
+  /// 但 APK 不会用到那种极端情况）足够覆盖。
+  Future<bool> _looksLikeCompleteZip(File f, int length) async {
+    const signature = [0x50, 0x4B, 0x05, 0x06]; // 'P','K',0x05,0x06
+    const tailBytes = 64 * 1024;
+    final start = length > tailBytes ? length - tailBytes : 0;
+    try {
+      final raf = await f.open();
+      try {
+        await raf.setPosition(start);
+        final tail = await raf.read(length - start);
+        for (var i = tail.length - 4; i >= 0; i--) {
+          if (tail[i] == signature[0] &&
+              tail[i + 1] == signature[1] &&
+              tail[i + 2] == signature[2] &&
+              tail[i + 3] == signature[3]) {
+            return true;
+          }
+        }
+        return false;
+      } finally {
+        await raf.close();
+      }
+    } catch (e) {
+      debugPrint('[更新] zip 尾部检查失败（按不完整处理）: $e');
+      return false;
+    }
+  }
+
   /// 「差一步授权」的统一文案与状态。
   ///
   /// 抽出来是因为它现在有**两个**触发点：下载完成后、以及复用本地包时。
@@ -248,6 +336,31 @@ class AppUpdateService {
       );
 
       onProgress(UpdateStatus(stage: UpdateStage.readyToInstall));
+
+      // ⚠️⚠️ 唤起安装器**之前必须校验刚下载的包**。
+      //
+      // 用户反复遇到「解析安装包时出现问题」。根因就在这里：
+      // `_dio.download()` 返回成功**不代表文件完整** —— 连接被中断/被截断时
+      // 它仍可能正常返回，留下一个尾部缺失的 APK。而 APK 是 zip，
+      // 尾部恰好是「中央目录」（记录所有条目的位置）：
+      // 少了几十字节，系统安装器就会报**解析失败**。
+      //
+      // 更糟的是这个错误看起来像「包本身有问题」，而重下一次就好了 ——
+      // 用户只会觉得「这个 App 装不上」。
+      //
+      // 校验顺序：sha256（服务端给了就用，最严格）→ 大小 → zip 尾部签名。
+      // 任一环节判为不完整就**删掉残包并报错**，让用户重试是一次干净的重下。
+      final integrity = await _verifyDownloaded(savePath, info);
+      if (integrity != null) {
+        debugPrint('[更新] 下载校验未通过：$integrity');
+        // 一定要删：留着的话下次会走复用分支，装的还是这个坏包。
+        try {
+          final bad = File(savePath);
+          if (await bad.exists()) await bad.delete();
+        } catch (_) {}
+        onProgress(UpdateStatus(stage: UpdateStage.failed, message: integrity));
+        return integrity;
+      }
 
       // ⚠️ 唤起安装器**之前**先确认「允许安装未知应用」。
       //
