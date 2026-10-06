@@ -1,0 +1,1085 @@
+# AGENTS.md
+
+本文件是本仓库的**唯一权威开发文档**，面向通用编码代理（Codex / Claude Code / 其他 AI 工具）与人类开发者。
+
+## 文档维护约定（先读这一节）
+
+- 项目现状、目录结构、命令、领域约定**只在 `AGENTS.md` 维护**，改文档请改这里。
+- `CLAUDE.md` 只保留「指向本文件的简短说明 + 项目速览 + 本约定」，不再复制长文档，避免两份文档再次漂移。
+- `campus-run-backend/README.md`（后端）与 `campus-run-app/README.md`（前端）是各自子项目的上手文档，负责环境、启动、测试与已知限制；与本文档冲突时以本文档为准。
+- ⚠️ Windows 文件系统大小写不敏感：`CLAUDE.md` 与 `claude.md` 是**同一个文件**（git 里跟踪的是小写名 `claude.md`），不要创建第二个。
+
+# 项目：校园跑 Campus Run
+
+面向高校学生的运动记录与社交 App（跑步/骑行轨迹记录 + 排行榜 + 好友聊天 + 专属模式）。
+
+## 技术栈
+
+| 层 | 实际使用 |
+|----|----------|
+| 后端语言/框架 | Java 17、Spring Boot 3.2.5 |
+| 数据库 | MySQL 8（生产/本地）、H2 内存库（测试） |
+| ORM | MyBatis-Plus 3.5.7 |
+| 鉴权 | Spring Security + JWT（jjwt 0.12.6）；**双令牌** access(2h) + refresh(30d)，入口限流 |
+| 实时通信 | Spring WebSocket（原生 handler，非 STOMP） |
+| 前端 | Flutter（Dart SDK `^3.7.2`）+ Riverpod 3 + go_router 17 + Dio 5 |
+| 前端其他依赖 | `flutter_secure_storage`、`shared_preferences`、`web_socket_channel`、`geolocator`、`flutter_map`、`latlong2`、`image_picker`（选头像） |
+| 覆盖率 | JaCoCo 0.8.12 |
+
+> **Redis 已不在技术栈内**：`campus-run-server/pom.xml` 没有 Redis 依赖，代码中 0 处 Redis 引用，
+> `docker-compose.yml` 也只起 MySQL。排行榜完全基于 MySQL 的 `leaderboard_stats` 表实现，
+> 设计文档里「Redis ZSET 排行榜」是**已废弃的历史方案**，不要再按它写代码。
+
+## 当前状态（截至 2026-10-03）
+
+**四个阶段全部已落地，后端与前端都是可运行的真实代码，不再是设计阶段。**
+
+| 阶段 | 范围 | 状态 |
+|------|------|------|
+| 一 | 用户注册/登录 + 专属 ID + 运动记录 | 已完成 |
+| 二 | 排行榜 + 轨迹可视化 | 已完成 |
+| 三 | 好友 + 聊天（WebSocket） | 已完成 |
+| 四 | 专属模式：校园围栏 / 运动目标 / 勋章 | 已完成 |
+
+> 编号口径差异：`campus-run-backend/docs/api.md` 把「用户鉴权」和「运动记录」拆成第一、第二阶段，
+> 把专属模式标为「第五阶段」。这只是文档编号不同，功能范围与上表一致。
+
+代码量（用 `Get-ChildItem -Recurse -Filter *.java` / `*.dart` 可复核）：
+
+- 后端 145 个 Java 文件（`campus-run-server` + `campus-run-common`）。
+- 后端测试 **282 个用例全部通过**（`mvn -B -pl campus-run-server -am test`，`BUILD SUCCESS`，`Tests run: 282, Failures: 0, Errors: 0, Skipped: 0`）。
+- 前端 `lib/` 下 Dart 文件（core / data / features 分层），`test/` 下 11 个测试文件（**207 个用例全绿**）。
+
+## 目录结构
+
+```
+project/
+├── campus-run-backend/          后端 Maven 多模块工程
+│   ├── pom.xml                  聚合 POM（Spring Boot 3.2.5 parent，JaCoCo 配置）
+│   ├── docker-compose.yml       本地依赖：仅 MySQL 8
+│   ├── campus-run-common/       公共模块：Result<T> 统一返回体、错误码、业务异常
+│   ├── campus-run-server/       可运行应用：全部业务代码 + 测试
+│   │   ├── src/main/java/com/campusrun/server/
+│   │   │   ├── controller/      9 个 REST 控制器（不写业务逻辑）
+│   │   │   ├── service/impl/    9 个业务实现（事务边界）
+│   │   │   ├── mapper/          MyBatis-Plus Mapper
+│   │   │   ├── entity/ dto/     Entity 与 DTO 分离
+│   │   │   ├── security/        JWT 生成/校验、认证过滤器
+│   │   │   ├── websocket/       握手鉴权 + 聊天 handler + 会话管理
+│   │   │   ├── cache/           FenceCache（应用内缓存，非 Redis）
+│   │   │   ├── event/           领域事件（好友、勋章）
+│   │   │   ├── task/            定时任务（排行榜/目标/勋章/会话清理）
+│   │   │   └── util/            GpsUtil（平滑+抽稀）、UniqueIdGenerator
+│   │   ├── src/main/resources/  application.yml、schema.sql
+│   │   └── src/test/            27 个测试类 + H2 测试配置
+│   └── docs/                    api.md（831 行完整接口文档）、schema.sql、admin-init.md
+├── campus-run-app/              Flutter 客户端
+│   ├── lib/core/                config/network/router/storage/theme/utils/widgets/ws
+│   ├── lib/data/                models（15 个 DTO）+ repositories（7 个）
+│   ├── lib/features/            activity/auth/badges/friends/goals/home/leaderboard/notifications/profile
+│   ├── design/                  首页设计规格 PNG（home_spec / home_loaded / home_empty）★设计资产
+│   └── test/                    单元测试（目前只有 widget_test.dart）
+├── flutter-design/flutter_ui/   设计稿导出的 Flutter 参考工程（仅参考，非生产代码）
+├── 前端页面示例/                4 张 UI 示例 PNG ★设计资产
+├── AGENTS.md                    本文件（权威文档）
+└── claude.md / CLAUDE.md        同一文件，指向本文件
+```
+
+`runApp_frame.txt`、`extra_suggest.md` 是早期设计原文，**当前不在仓库里**；其中的有效结论已内联到本文档。
+
+### 后端模块职责
+
+- `campus-run-common`：`com.campusrun.common.result.Result<T>`、`com.campusrun.common.exception`（错误码 + 业务异常）。无测试代码。
+- `campus-run-server`：Spring Boot 可运行应用，包含全部业务、WebSocket、定时任务；所有测试都在这里。
+
+### 前端分层
+
+- `core/`：跨域基础设施。`config/app_config.dart`（API 地址）、`network/`（Dio 封装）、`router/app_router.dart`（go_router 路由表）、`storage/`（token 持久化）、`theme/`（设计系统：`app_theme.dart` 调色板、`app_font_size.dart` 字号 token、`app_spacing.dart` 间距 token、`theme_palette.dart` 颜色 token）、`widgets/`（共享组件，`app_widgets.dart` 为 barrel 出口）、`ws/`（WebSocket 客户端）。
+- `data/`：`models/` 纯数据模型，`repositories/` 调后端接口，不写 UI。
+- `features/`：按业务域拆分，每个域内 `pages/` + `providers/` + 可选 `widgets/`。
+- 已注册路由：`/splash` `/login` `/register` `/home` `/leaderboard` `/friends` `/profile` `/activity` `/start-run` `/run-result` `/activity/:id` `/chat/:friendId` `/friends/search` `/goals` `/badges` `/notifications`。
+
+## 常用命令（均已在本地验证或对照真实脚本）
+
+后端（在 `campus-run-backend/` 下执行）：
+
+```bash
+# 1. 启动本地 MySQL（docker-compose 里只有 MySQL，没有 Redis）
+docker compose up -d
+
+# 2. 全量测试（H2 内存库，不需要本地 MySQL）——推荐
+mvn -B -pl campus-run-server -am test
+# 等价：mvn test（在聚合根目录跑两个模块）
+
+# 3. 只跑单个测试类 / 单个方法
+mvn -B -pl campus-run-server -am test -Dtest=MessageServiceImplTest
+mvn -B -pl campus-run-server -am test -Dtest=MessageServiceImplTest#方法名
+
+# 4. 覆盖率报告：跑完 test 后打开 campus-run-server/target/site/jacoco/index.html
+
+# 5. 启动应用（多模块工程请带上 -pl campus-run-server -am，指定运行 server 模块）
+mvn -B -pl campus-run-server -am spring-boot:run
+```
+
+前端（在 `campus-run-app/` 下执行）：
+
+```bash
+flutter pub get
+flutter run
+flutter test                 # 单元测试
+flutter analyze              # 静态检查
+
+# 真机/局域网调试：覆盖后端地址
+flutter run --dart-define=API_BASE_URL=http://<局域网IP>:8080
+```
+
+> **环境注意（无网络时）**：本机 Flutter 包装脚本 `flutter`（`C:\dev\flutter\bin\flutter.bat`）在没有网络时会卡在
+> git version check（`git fetch --tags` 访问 github.com）不返回。此时静态检查直接用原始 Dart SDK：
+>
+> ```powershell
+> C:\dev\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .
+> ```
+>
+> （`dart analyze` 需要启动 analysis server 子进程，在受限沙箱里可能被拒绝；普通桌面环境可用。`flutter pub get` / `flutter run` 仍需联网或预热过的 pub cache。）
+
+## 测试与覆盖率现状
+
+- 后端：**282 个用例，全绿**；JaCoCo 覆盖率数字会随代码变动，引用前请重跑 `mvn -B -pl campus-run-server -am test` 后打开 `campus-run-server/target/site/jacoco/index.html`。
+- 测试环境：`src/test/resources/application-test.yml` 用 H2 内存库（`MODE=MySQL`），**不依赖本地 MySQL**；`src/test/resources/schema.sql` 建表。
+- 前端：`test/` 下 11 个文件 / **207 个用例全绿**（validators / formatters / coord_transform / models / ws_message / widgets / home_sections / widget_test / chat_ownership / account_isolation / run_tracking）。
+  另有 2 个**评估用**脚本不属于断言测试：`visual_qa_test.dart`（渲染 30 张截图，其中 flutter_map 那条因测试环境缺 path_provider 插件会失败）与 `qa_contrast_check.dart`（打印 WCAG 对比度实测值）。这两者请勿计入 CI 断言。
+
+## 关键领域约定
+
+- 专属 ID：**8 位纯数字**（左侧补零，如 `04231786`），全局唯一，由 `UniqueIdGenerator` 生成。
+  历史上是 `CR-XXXXXXXX`，已废弃——带字母前缀会让用户在好友搜索框里犹豫「要不要连 CR- 一起输」。
+  界面上一律以 `ID 04231786` 的形式展示（`Formatters.uniqueId`），该函数会自动剥掉历史 `CR-` 前缀。
+  已有 `CR-` 数据可执行一次性迁移：`UPDATE user SET unique_id = SUBSTRING(unique_id, 4) WHERE unique_id LIKE 'CR-%';`
+- **好友搜索**（微信式社交模型）：按「专属 ID / 昵称 / 手机号」模糊匹配，**自己与已有好友同样会被搜到并展示**，
+  由服务端返回的 `relation` 字段（`self` / `friend` / `pending_outgoing` / `pending_incoming` / `none`）决定操作按钮：
+  自己→看主页、好友→发消息、我申请过→等待中、对方申请我→通过验证、无关系→添加好友。
+  **按钮状态一律以服务端 relation 为准**，前端不自行推断，避免「看起来能聊但发送被拒」这类不一致。
+- **用户主页**：`GET /api/v1/user/{userId}/profile`，任意用户可看（含自己），返回昵称、专属 ID、头像、
+  加入时间、运动汇总（累计距离/次数/连续天数）与 relation。
+  **刻意不返回手机号** —— 主页对任何搜到的人可见，手机号只在 `/me` 对自己可见；已有单测用反射兜底防回归。
+  前端路由 `/user/:id`，入口有四处：「我的」页的「我的主页」、搜索结果的整卡点击、
+  聊天页标题栏（头像+昵称可点）、以及聊天页右上角「三个点 → 查看 TA 的主页」。
+- **编辑资料**：`PUT /api/v1/user/me`（昵称 1-20 字、头像 URL，两者均可空）。
+  **null = 不修改**（PATCH 语义）：客户端只传头像时不会把昵称清空；头像传空串 = 清空，回到昵称首字兜底。
+  手机号与专属 ID 不可改（前者是账号标识，后者是别人加你的凭据）。
+- **头像上传**：POST /api/v1/upload/avatar（multipart，字段名 `file`），返回 `{url}`，
+  再通过 `PUT /api/v1/user/me` 写入 `avatarUrl` —— 上传与「设为头像」是两个动作，
+  上传失败不会把已有资料改坏。
+  **安全实现要点**（都不是可选项）：按**魔术字节**识别 JPG/PNG/WebP（不信扩展名与
+  Content-Type，否则 `shell.jpg` 里放 PHP 就能绕过）；**服务端用 UUID 重命名**（防路径穿越与同名覆盖）；
+  落盘前校验目标路径仍在 `app.upload-dir` 之内；限制 2MB（Spring multipart 配置 + 服务层二次校验）。
+  **拒绝 SVG**：SVG 可内嵌 `<script>`，当图片渲染等于 XSS。
+  静态访问 `/uploads/**` 需在 Spring Security 中 `permitAll`（`<img>` 不会带 Authorization 头），
+  且资源 location 必须是 `file:` 前缀 + **正斜杠** + 结尾 `/` —— 直接用
+  `Path.toUri()` 在 Windows 上得到 `file:///C:/...`，Spring 解析不到，表现为「上传成功但图片 404」。
+  相关配置：`app.upload-dir` / `app.public-base-url`（放在 Nginx 后要改成对外域名，否则返回的 URL 客户端打不开）。
+  已有 7 个安全用例：`FileStorageServiceTest`（伪装图片 / SVG / 超大 / 空文件 / 路径穿越 / 同名覆盖）。
+- **他人运动数据 / 勋章墙**：`GET /api/v1/user/{userId}/activities`、`GET /api/v1/user/{userId}/badges`。
+  **仅好友（或自己）可见，非好友返回 HTTP 403 + body `code=403`**。
+  为此引入了 `ForbiddenException`（`campus-run-common`）并在全局处理器上标注 `@ResponseStatus(FORBIDDEN)`：
+  业务异常默认按 HTTP 200 返回，但权限拒绝**必须让状态码本身是 403**，否则调用方无法仅凭状态码区分
+  「没权限」与「对方没数据」，前端会把越权渲染成空态。不能用 Spring Security 的 `AccessDeniedException`
+  ——`campus-run-common` 不依赖 spring-security。
+  已有两层测试固化：Service 层断言抛 `ForbiddenException` 且**权限不通过时不去查数据**；
+  HTTP 层（`UserSocialDataAccessTest`）断言陌生人 403 / 好友 200 / 未登录 401。
+- **聊天页**采用微信式结构：标题栏 = 对方头像 + 昵称（整块可点进主页），右上角「三个点」菜单提供
+  「查看 TA 的主页」与「查看聊天记录」（`/chat/:friendId/history`，只读、最新在上）。
+  跳转聊天时通过 `extra` 传 `{'name':…, 'avatarUrl':…}`，标题栏先渲染传入头像再由 profile 覆盖，避免闪烁。
+- **账号数据隔离（曾出一类 bug，务必按此约定写）**：任何返回「当前登录用户私有数据」的 provider
+  **必须先调用 `ref.watchUserId()`**（`lib/core/providers/account_scope.dart`）。
+  这些 provider 是全局缓存、默认与账号无关：同一设备 A 退出、B 登录后缓存不失效，
+  B 会读到 **A 的数据**。已出过的表现：
+  「自己的账号出现在自己的好友列表里」（B 看到 A 的好友列表，而 A 的好友恰好是 B）。
+  已按此约定加固：`friendListProvider` / `friendRequestsProvider` / `friendSearchProvider`
+  （relation 是相对当前用户算的）/ `activityListProvider` / `goalListProvider` /
+  `badgeMineProvider` / `messageHistoryProvider` / `myRankProvider` / 首页 `_lastWeekRankProvider`。
+  `watchUserId()` 同时解决了「登出瞬间带旧令牌打一次必然 401 的请求」：未登录时直接返回空数据、不发请求。
+  **参数已带 userId 的 family provider**（如 `userProfileProvider(id)`）天然分账号，无需调用。
+  回归由 `test/account_isolation_test.dart` 固化（已验：去掉 `watchUserId` 该测试即失败）。
+- **未读红点 / 当前会话也必须随账号重置**：`friendBadgeProvider`（未读红点）与
+  `currentChatFriendIdProvider`（当前打开的会话）都是**全局内存状态，登出不会清**。
+  不重置会有两个 bug：新账号继承上一个账号的红点；以及若上一个会话的好友恰好也是新账号的好友，
+  新消息会被 `app.dart` 误判成「正在看这个会话」而**被吞掉 —— 表现为收到消息没有提醒**。
+  两者均已改为在 `build()` 里 `ref.watchUserId()`，账号一变即重建归零。
+- **Web 上传必须用 `MultipartFile.fromBytes`，绝不能用 `MultipartFile.fromFile`**：
+  `fromFile` 依赖 `dart:io`，Web 上其构造函数直接抛
+  `UnsupportedError("MultipartFile is only supported where dart:io is available.")`。
+  更隐蔽的是 **dart2js 会因此把 `fromFile` 之后的代码判定为不可达，
+  把整个方法与接口路径字符串一起 tree-shake 掉** —— 症状是「前端选了图毫无反应」，
+  而且产物里**搜不到 `/api/v1/upload/avatar`**。排查此类「代码写了但产物里没有」的问题时，
+  用 `python` 对 `build/web/main.dart.js` 做字节级字符串搜索比 `Select-String` 可靠
+  （后者受 GBK 控制台影响，且 Dart 会把非 ASCII 转义成 `\uXXXX`）。
+  Web 端 `XFile.path` 是 blob URL，必须先 `readAsBytes()` 再上传。
+- **消息归属判定（曾出一处 bug，务必按此约定写）**：气泡左右只由 `message.senderId == 当前登录 userId`
+  决定，**与会话对象 `friendId` 无关**。
+  ⚠️ 渲染路径**必须使用 `ref.watch(authProvider)` 的结果**，不能用 `ref.read(authProvider)`：
+  `read` 只读一次、不订阅，首帧登录态尚未解析完成时会拿到 null（userId=0），
+  于是 `senderId == 0` 恒为 false，**所有消息都被判成「收到的」**。
+  表现就是「A 发给 B 的消息，在 B 侧显示成 B 自己发的」。回归由 `test/chat_ownership_test.dart` 固化。
+  事件回调（如乐观消息的 `senderId`）用 `ref.read` 取即时值是正确的。
+- 运动类型：`1` = 跑步，`2` = 骑行。
+- 核心表：`user`、`activity`（运动记录，轨迹以 JSON 存储）、`friendship`、`message`、`leaderboard_stats`、`goal`、`badge`、`user_badge`、`campus_fence`（完整 DDL 见 `campus-run-backend/docs/schema.sql`）。
+- GPS 轨迹：距离用 Haversine 累加（`GpsUtil`）。**反作弊已实现部分**：`TrackAnomalyDetector` 做轨迹物理合理性校验（相邻点瞬时速度上限、加速度上限、全程平均速度上限、重复时间戳位移、原地漂移、未来时间戳），命中则置 `activity.invalid=1` 并把原因写入 `invalid_reason`，**不计入排行榜/目标/勋章**；专属模式下再叠加地理围栏（轨迹点在围栏内的比例 ≥ `1 - allowedOutsideRatio`）。
+- **尚未实现（原文档曾误标为已实现）**：滑动平均平滑、道格拉斯-普克抽稀、随机打卡点、步频校验。
+- 统一返回 `Result<T>`，全局异常处理；密码 BCrypt；禁止提交密钥与真实配置（`application.yml` 里的 JWT secret / 数据库口令仅本地开发用）。
+
+## 跑步核心链路（曾有一批"让用户白跑"的缺陷，已修）
+
+**这是全项目最关键的链路**：界面再漂亮，定位不准或丢数据就等于产品废了。
+以下每条都曾经真实存在，修复要点与理由必须保留。
+
+### 定位与距离（"定位不准"的真实原因）
+
+- **必须按精度过滤**。手机在楼下/树荫/高楼间误差常到 20-50 米，这种点会让轨迹
+  "跳出去又跳回来"，一次抖动凭空产生上百米。
+  客户端阈值 30 米（`TrackSampler.maxAccuracyMeters`），服务端 35 米（`GpsUtil.MAX_ACCURACY_METERS`）。
+  修复前后端都用原始轨迹算距离，**实测一条 340 米的路线能被脏点算成 2000+ 米**。
+- **判定口径必须与成绩口径一致**：`ActivityServiceImpl` 用 `totalDistanceMetersFiltered`
+  作为成绩，反作弊的「平均速度」也用同一个值。曾出现成绩用过滤值、判定用原始值的矛盾，
+  结果一段 GPS 漂移把平均速度推到 100+ km/h，**正常跑步被判超速作弊、不计成绩**。
+- 规则集中在 `lib/features/activity/utils/track_sampler.dart`（纯函数、可单测），
+  页面不再各写一份，避免"页面能跑但规则和测试不一致"。
+  **前端与后端必须同算法**（`TrackSampler` ↔ `GpsUtil`），改一边就要改另一边。
+
+### 🐞 已踩过的坑：「运动记录距离为 0」（走路的人全为 0）
+
+**症状**：部分账号的运动记录距离显示 0，看起来像"某些账号有问题"。
+
+**真实根因**：不是账号问题，是**速度**问题。旧判据是逐段阈值：
+
+```
+位移 >= 2 米  →  计入
+位移 <  2 米 且 间隔 >= 5 秒  →  计入
+否则丢弃
+```
+
+而 **geolocator 在多数机型上是 1 秒采样**，于是：
+
+| 速度 | 单段位移（1 秒） | 结果 |
+|---|---|---|
+| 慢走 1.4 m/s | 1.40 米 | ≥2? 否，间隔≥5s? 否 → **丢弃** |
+| 慢跑 2.0 m/s | 2.00 米 | 严格小于 2 也算否 → **丢弃** |
+| 跑步 3.0 m/s | 3.00 米 | ≥2? 是 → 计入 |
+
+**每一段都被丢弃 → 距离累加恰好为 0**。
+所以「走路的人全为 0、跑步的人全部正常」——这才是"部分账号"的真相。
+
+还有第二个成因：累加基准用的是「上一个**被采信**的点」。连续拒绝时基准被冻结，
+后续位移都被同一个远点衡量，进一步锁死为 0。
+
+**修复**：改用**滑窗方向一致性**判据（`COHERENCE_WINDOW_SECONDS = 5.0`、
+`MIN_STRAIGHTNESS = 0.6`）：
+
+- 5 秒窗口内分别累计「净位移」与「路径长度」，比值 ≥ 0.6 才算真实移动；
+- 真实走直线 → 比值接近 1 → 计入；静止抖动来回漂移 → 路径长度不断累加、
+  净位移被限制在抖动幅度内 → 比值很低 → 滤掉；
+- **判据对速度不敏感**，因此慢走与快跑一视同仁，也不会因采样间隔从 1 秒变 5 秒而翻盘。
+
+**实测（120 秒行程，期望 = 速度 × 120）**：
+
+| 速度 | 1s 采样 | 2s | 3s | 5s | 10s |
+|---|---|---|---|---|---|
+| 0.6 m/s | 72 | 80 | 80 | 72 | 72 |
+| 1.4 m/s | 168 | 160 | 160 | 168 | 168 |
+| 3.0 m/s | 360 | 360 | 360 | 360 | 360 |
+
+**已知下限**：< 0.6 m/s（比散步还慢）时 5 秒窗口净位移太小、无方向性，
+会被当成原地漂移。这是明确的取舍 —— 用「暂停」按钮处理站立不动，
+比让慢走用户白跑一次好得多。
+
+回归测试：后端 `GpsUtilSlowWalkTest`（6 个）+ `GpsUtilRealTrackTest`（4 个，
+用**生产库导出的 520 点真实轨迹**验证新算法与历史值一致）+ 前端 `run_tracking_test.dart`
+的「慢走/短间隔不能算出 0」组。
+
+### 历史坏数据的修复（`/api/v1/admin/maintenance/repair-distance`）
+
+**为什么需要它**：算法修复**只对新运动生效**。库里已经存下的记录 `distance_meters`
+仍是当初算错的 0 —— 用户看到旧记录还是 0，会认为「根本没修好」。轨迹 JSON 还在，
+所以可以用新算法重算。
+
+**为什么不能只改 `activity` 表**：距离被三处聚合吃掉了，
+只改原表会变成「记录对了但排行榜还是错的」——数据自相矛盾比不修更糟：
+
+| 聚合 | 表 | 修复方式 |
+|---|---|---|
+| 累计里程/次数 | `user_stats` | 相关子查询按 `activity` 重算 |
+| 日/周/月/rolling30d 榜 | `leaderboard_stats` | **先删 period 再按 activity 重新聚合** |
+| 目标进度 | `user_goal` | 按目标区间内的有效运动距离求和 |
+
+**关键设计**（都有测试固化）：
+
+- **全部「先删后重算」**，结果只由 `activity` 唯一决定 → **幂等**，
+  可以安全重复执行（第二次 `fixedActivities = 0`，聚合值不变）。
+  不用「把差额加回去」：那要求逐条确认该记录当初有没有真正写进聚合表，
+  而历史 bug 可能同时影响了写入链路，对账既脆弱又难验证。
+- **`dryRun=true` 预演**：只统计不写库。这是一次不可逆的批量改写，
+  执行前必须先看影响面。
+- **单条脏数据不中止整批**：轨迹 JSON 解析失败只记 `unparsableTracks` 并跳过；
+  没有轨迹的记录**保持原样**（不猜、不猜错）。
+- **只重算能推导的字段**：刻意**不碰** `weekly_goal_completed_count` ——
+  那是「完成周目标」这一过程的结果，无法从 activity 反推，重算会把用户成绩抹掉。
+- **整体一个事务**：中途失败整体回滚，不留半成品。
+- **`invalid = 1` 的记录不参与聚合**（与榜单口径一致）。
+
+**实现注意（踩过的坑）**：
+
+- 聚合 SQL 一律用 `CAST(x AS DATE)` 而不是 MySQL 的 `DATE_FORMAT()` ——
+  后者在 H2（测试库）里不存在，会让整个测试跑不起来。
+- 用 `GROUP_CONCAT` 造测试轨迹时记得 `SET SESSION group_concat_max_len`，
+  默认 1024 字节会把 JSON 截断成非法 JSON（我因此造出过一条坏数据）。
+- 修复逻辑放在 Java 服务里而不是写成 SQL 脚本：它要用到**新版本的距离算法**，
+  SQL 里重写一遍等于维护两套算法，一旦漂移就会重演
+  「成绩用过滤值、判定用原始值」那类事故。
+
+**用法**：
+
+```bash
+# ① 预演（不写库）
+curl -X POST "http://<host>:8080/api/v1/admin/maintenance/repair-distance?dryRun=true" \
+     -H "Authorization: Bearer <ADMIN 的 access token>"
+# ② 确认 fixedActivities 符合预期后正式执行
+curl -X POST "http://<host>:8080/api/v1/admin/maintenance/repair-distance?dryRun=false" \
+     -H "Authorization: Bearer <ADMIN 的 access token>"
+```
+
+回归测试：`DistanceRepairServiceImplTest`（7 个，H2 集成测试，含
+`dryRun` 不写库 / 幂等 / 脏数据不中止 / `invalid` 不污染榜单 / 无轨迹不猜值）。
+另在**真实 MySQL 8.4** 上逐条实测过全部 7 条生产 SQL 语句。
+
+### 反作弊（曾把正常跑步整单作废）
+
+- ⚠️ **加速度不能用「段速度 ÷ 段时长」算**。GPS 采样间隔在 0.2-1 秒波动，
+  按那个写法**正常跑步（3 m/s、间隔 0.3 秒）会得出 10 m/s²，撞上 8 m/s² 阈值**，
+  骑行更快几乎必然命中。正确做法是速度变化率 `|v2-v1| / Δt`，
+  并要求 `Δt ≥ 0.4s`（更短的时段速度噪声过大，不参与判定）。
+- 重复时间戳的位移阈值从 1 米放宽到 5 米：静止时抖 2-3 米是常态。
+- 精度差的点不参与反作弊判定 —— 脏点本来就该被距离计算忽略，拿它判作弊会误伤用户。
+- **已知局限**：定长采样下的瞬移主要由 `SEGMENT_SPEED_TOO_HIGH` 抓；
+  加速度判定只在采样间隔不规则时起作用。这是合理的，但改阈值前要理解这一点。
+
+### 数据保留（曾整次运动丢失）
+
+- **本地草稿**（`lib/core/storage/run_draft_storage.dart`）：轨迹原先只在内存里，
+  切后台被系统回收 / 崩溃 / 手滑返回都会让整次运动**彻底消失且无法恢复**。
+  现在每 2 秒落盘一次，重进 App 自动恢复并可继续或直接结束；**上传成功才清草稿**，
+  上传失败保留（提示"运动数据已保留，可重试上传"）。
+- **用时用墙钟（Stopwatch）而不是"每秒 +1"**：后者在 App 被挂起时停止走时，
+  而用户还在跑 —— 时长偏短、配速偏快；更严重的是上报的 `startTime` 由
+  `endTime - 累计时长` 反推，会晚于第一个轨迹点，直接触发后端
+  「开始时间超出时钟偏差」把整次运动作废。现在用第一个有效点的时间作 `startTime`。
+- **返回键确认**（`PopScope`）：跑步中误触返回会丢数据，现在弹确认并提供
+  「保留并离开」。`start_run_page` 同时实现了 `WidgetsBindingObserver`，
+  从后台回前台时校准计时并立刻存一次草稿。
+
+### 尚未验证的部分（重要）
+
+- **Android 从未真正构建过**（`build/app` 不存在），所以
+  「锁屏/切后台是否继续记录」只在代码层面正确，**未经真机验证**。
+  manifest 已含 `ACCESS_BACKGROUND_LOCATION` / `FOREGROUND_SERVICE_LOCATION` 等权限，
+  前台服务声明由 geolocator 插件通过 manifest 合并提供（已核对插件 manifest）。
+- **Web 版不支持定位**（`kIsWeb` 分支直接提示），这是预期行为。
+
+## 排行榜的社交化增强（已实现）
+
+排行榜是**加好友的主要入口**，不只是看数字。
+
+- 榜单每条记录额外返回三个字段：
+  - `relation`（self / friend / pending_outgoing / pending_incoming / none）——
+    由 `UserRelationResolver` 相对**当前登录用户**计算。
+    **按钮状态一律以它为准**，前端不自行推断，否则会出现「显示加好友、点了报已存在」。
+  - `gapToAheadMeters` / `gapToBehindMeters` —— 与前后名的距离差。
+    **这是竞争感的关键**：只报总里程，用户不知道自己离前一名差多远、追不追得上。
+    注意差距只在**本页内**计算；分页时本页第一条不会被误判成第 1 名（已有单测固化方向与非负性）。
+- `getBoard` 新增 `currentUserId` 参数；接口用 `default` 方法保留了 5 参重载，
+  避免改动既有调用点。
+- 前端（`leaderboard_page.dart`）：
+  - **领奖台**：前三名放大展示（冠军居中、台面最高、奖牌色），其余走列表，避免平铺罗列。
+  - 每行**整行可点**进主页；行内按 `relation` 显示「加好友 / 发消息 / 通过 / 等待通过」。
+  - **自己那一行高亮**（`AppColors.primaryLight`）+「我」标签 —— 榜单最核心的诉求是「我在哪」。
+  - 副标题优先显示「距上一名还差 X」而不是 ID，让差距变成可追赶的目标。
+  - `AppCard` 新增可选 `color` 参数（默认不变），用于行高亮。
+
+## 排行榜规范（已实现，MySQL 方案）
+
+- 支持日榜、周榜、滚动 30 天榜、自然月榜。
+- **不使用 Redis**：排行榜数据完全基于 MySQL 的 `leaderboard_stats` 表实现。
+- 实时更新用 `INSERT ... ON DUPLICATE KEY UPDATE`。
+- 凌晨用定时任务（`task/LeaderboardScheduler`）重算滚动 30 天榜并清理过期数据。
+- 查询直接走 SQL `ORDER BY ... LIMIT`。
+- 历史方案「Redis ZSET，key `leaderboard:{period}:{type}`，`ZINCRBY`/`ZREVRANGE`」已废弃，勿再实现。
+
+## 代码规范
+
+- Controller 不写业务逻辑
+- Service 负责事务
+- DTO 与 Entity 分离
+- 统一返回 Result<T>
+- 全局异常处理
+- 密码必须 BCrypt
+- 禁止提交密钥和真实配置
+- 前端：颜色/字号/间距一律走 `core/theme` 的 token，不写裸 `Color(0x...)` 与裸 `fontSize: <数字>`
+
+## 设计决策：好友拒绝逻辑
+
+- 拒绝好友申请 = 删除 PENDING 记录，不保留 REJECTED 状态
+- 理由：语义干净、允许重发、避免唯一键冲突
+- 若将来需要「拒绝历史」或「黑名单」，单独建 user_block 表，不改 friendship
+
+## 鉴权与限流（已实现）
+
+**双令牌**，解决「24 小时单令牌导致每天被强制登出」：
+
+| 令牌 | 有效期 | 用途 |
+|------|--------|------|
+| access | `jwt.expiration`，默认 2 小时 | 随每个请求发送（`Authorization: Bearer`） |
+| refresh | `jwt.refresh-expiration`，默认 30 天 | 仅用于 `POST /api/v1/auth/refresh` 换新 access |
+
+- 两类令牌都带 `typ` 声明；**`parseAccessToken` 只接受 access**，因此长效 refresh token 无法直接调业务接口（`JwtAuthenticationFilter` 即用它鉴权）。这是双令牌方案最容易出的漏洞，已有单测固化。
+- 前端 `AuthInterceptor` 遇到 401 会自动刷新并**重放原请求**；刷新用**单飞（single-flight）**保证并发 401 只触发一次刷新，并只重放一次防止死循环。刷新失败则清空两类令牌回登录页。
+- 登出用 `TokenStorage.clearAll()`（只清 access 会留下可用的 refresh token，等于没登出）。
+
+**入口限流**（`RateLimiter`，进程内滑动窗口，零依赖）：
+
+- `login` / `register` / `refresh` 三个入口，按「手机号 + IP」双维度计数（手机号 10 次 / 5 分钟，IP 30 次 / 5 分钟），超限返回 `429 TOO_MANY_REQUESTS`。
+- 只按 IP 挡不住分布式撞库，只按手机号挡不住批量注册刷不同号，两者叠加才有效。
+- 真实 IP 由 `ClientIpResolver` 按 `X-Forwarded-For` → `X-Real-IP` → `remoteAddr` 解析。**部署前提**：应用端口不能直接暴露公网，否则客户端可伪造该头绕过限流。
+- **单实例局限**：多实例部署时各实例独立计数，实际限额 = 单实例限额 × 实例数；届时应把 `RateLimiter` 换成 Redis 实现（接口不变）。
+
+**配置外部化**：`application.yml` 的数据库与 JWT 密钥全部支持环境变量覆盖
+（`DB_URL` / `DB_USERNAME` / `DB_PASSWORD` / `JWT_SECRET` / `JWT_EXPIRATION` / `JWT_REFRESH_EXPIRATION` / `CORS_ALLOWED_ORIGINS`），
+文件里保留的只是**本地开发默认值**。生产必须注入 `JWT_SECRET` 并把 `CORS_ALLOWED_ORIGINS` 收紧到真实域名。
+
+## 离线推送（已实现后端，前端待接入 SDK）
+
+**目标**：App 完全关闭时收到好友消息也能在通知栏看到。
+
+- 通道：**FCM HTTP v1**（`POST /v1/projects/{id}/messages:send`）。
+  旧版「服务器密钥 + `/fcm/send`」Google 已于 2024 年停用，网上教程多为旧版，勿照抄。
+- 令牌登记：`POST /api/v1/device/token`（幂等）；登出须 `DELETE /api/v1/device/token?token=...`。
+  `device_token.token` 唯一，注册用 `ON DUPLICATE KEY UPDATE` **改写归属** ——
+  同一台设备换账号登录时 FCM 令牌不变，不改写就会把通知推给上一个账号（隐私泄露）。
+- `PushSender` 抽象 + 两个实现：`LoggingPushSender`（默认，无凭证时把通知内容写日志）
+  与 `FcmPushSender`（`app.push.enabled=true` 时生效）。
+  这样**没有 Firebase 凭证也能把整条链路跑通并测试**，凭证另行注入。
+- 关键行为（均有单测）：
+  1. **对方在线时不推** —— WebSocket 已经显示了，再弹系统通知是重复打扰；只有 `!isOnline` 才推。
+  2. **先落库再推** —— 推送失败绝不丢消息。
+  3. **令牌失效（UNREGISTERED）才删令牌**；临时故障（429/5xx/网络）保留令牌，删错会让用户永远收不到通知。
+  4. 推送任何异常都吞掉，不影响消息发送。
+  5. 通知正文按**码点**截断（60 个 emoji 不会切出半个）。
+- 配置：`app.push.enabled` / `app.push.credentials`（服务账号 JSON 路径，支持 `classpath:` 与绝对路径）。
+  **凭证含私钥，必须在 .gitignore 中排除**；`google-services.json` / `GoogleService-Info.plist`
+  则**不要**排除（会被打包进 App，本就不算机密，排除会导致别人无法构建）。
+- 完整配置步骤（Firebase 建项目、Android/iOS/Web 三端设置、验证与排错）见
+  `campus-run-backend/docs/push-setup.md`。
+- **待办**：前端尚未接入 `firebase_core` / `firebase_messaging` 与后端登记调用；
+  真机验证需要真实凭证，当前仅在 `LoggingPushSender` 下验证过链路。
+
+## WebSocket 安全备注
+
+- WebSocket 握手鉴权：JWT 通过 URL query 参数 `?token=<jwt>` 传递（浏览器/Flutter WebSocket 无法自定义 Header）；`/ws/**` 在 Spring Security 中放行，鉴权由 `AuthHandshakeInterceptor` 完成，未登录连接会被拒绝。
+- 生产环境需在 Nginx 层关闭 `/ws` 路径的 query 参数日志（避免 token 泄入 access log），或改用 `Sec-WebSocket-Protocol` 头传递 token。
+- 服务端→客户端消息类型：`message` / `ack` / `read_receipt` / `pong` / `error`（详见 `docs/api.md` 的 WebSocket 章节）。
+
+## 消息已读回执（已实现）
+
+- `ChatMessageResponse.readAt`（Long 毫秒时间戳，`null` = 未读）。
+- 拉取 `GET /api/v1/message/history` 时隐式把「好友发给我且未读」的消息标记已读。
+- 显式接口：`POST /api/v1/message/read?messageIds=1&messageIds=2`（整批校验权限，非本人接收的消息返回 403，幂等）。
+- 标记成功后向发送方推送 WebSocket `read_receipt`：`data = { readerId, friendId, messageIds, readAt }`。
+  （详见 `campus-run-backend/docs/api.md` 第 16 / 16.1 节与 WebSocket 消息类型表。）
+
+## 运动目标周期（已实现）
+
+- `POST /api/v1/goals` 只需 `periodType` + `targetDistanceMeters`。
+- `weekly` = 服务端按 `Asia/Shanghai` 推导为本周一~周日；`monthly` = 当月 1 日~月末；客户端传的 `startDate`/`endDate` 被忽略。
+- `custom` 必须传 `startDate` 与 `endDate`，缺失或 `endDate < startDate` 返回 400。（详见 `docs/api.md` 第 22 节。）
+
+## 数据库升级注意事项
+
+- `message` 表已新增按接收方查询未读的索引，**生产库需手工执行一次**（`schema.sql` 已包含；执行前先确认索引不存在，避免重复添加报错）：
+
+  ```sql
+  ALTER TABLE message ADD KEY idx_receiver_sender_read (receiver_id, sender_id, read_at);
+  ```
+
+## 真机调试（Android）
+
+前置条件已核实：Flutter 3.29.3、Android SDK 36.1.0、Android Studio 2025.3.2 均就绪。
+**但 `build/app` 从不存在 —— 本项目从未构建过 Android 包**，首次构建需要联网拉 Gradle 依赖。
+
+### 推荐方式：adb reverse（绕开防火墙与 IP 变动）
+
+Windows 防火墙 + `Public` 网络类型默认**阻止手机访问 PC 的 8080**，
+而 `adb reverse` 把连接逆向隧道到 USB 上，**不经过网络**，因此：
+
+- 不需要动防火墙、不需要固定 IP、不需要手机与 PC 同网段
+- App 里连 `http://127.0.0.1:8080` 即可（Android 默认值即为此）。
+  ⚠️ **必须是 `127.0.0.1`，不能写 `localhost`** —— 详见下方「真机连接」小节，写错会表现为 App 报网络错误、而 curl 却能通。
+
+```bash
+# 1. 手机开启开发者选项 + USB 调试，插上 USB（选"文件传输"模式）
+C:\Android\Sdk\platform-tools\adb.exe devices          # 应看到 device（不是 unauthorized）
+C:\Android\Sdk\platform-tools\adb.exe reverse tcp:8080 tcp:8080
+
+# 2. 启动后端（本机）
+cd campus-run-backend\campus-run-server
+java -jar target\campus-run-server-1.0.0-SNAPSHOT.jar
+
+# 3. 跑 App（真机默认就是 localhost，无需额外参数）
+cd campus-run-app
+flutter run -d <设备id>
+```
+
+### 备选方式：局域网直连
+
+需要额外放行防火墙入站 8080（**需要管理员权限**），然后用 WLAN IP：
+
+```powershell
+New-NetFirewallRule -DisplayName "campus-run 8080" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
+```
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://<PC的WLAN IP>:8080
+```
+
+> ⚠️ **`PUBLIC_BASE_URL` 决定头像 URL 的主机名**。用 adb reverse 时填 `http://localhost:8080`；
+> 局域网直连时填 `http://<WLAN IP>:8080`，否则手机拿到的头像 URL 指向它自己、加载失败。
+
+### 首次构建的已知坑
+
+- `maven.google.com` 在国内常超时（`flutter doctor` 已提示网络错误）。
+  首次 `flutter build apk` 若卡住或失败，配置 Gradle 国内镜像
+  （`android/build.gradle` 的 `repositories` 换成阿里云 `maven.aliyun.com/repository/google` 等）。
+- 首次构建可能要 10-20 分钟，属正常。
+
+### 上机验收清单（按重要性排序）
+
+1. **切后台/锁屏后轨迹是否连续**（本次真机的核心目的，此前只做过代码层验证）。
+   注意把定位权限设为「始终允许」，并在 MIUI/EMUI 等系统里关闭该 App 的省电限制，
+   否则前台服务会被杀 —— 那是系统行为，不是代码问题。
+2. **杀掉 App 再进**：应提示「已恢复上次未完成的运动」，距离/时长延续。
+3. **距离准不准**：与已知路线（如操场圈数）比对，偏差应在几个百分点内。
+4. **不要出现「不计入成绩」**：跑完看结果页，不应被判作弊（这是上一轮修掉的主要缺陷）。
+5. 上传失败时草稿应保留并提示可重试。
+
+### ⚠️ 真机连接：Android 侧**必须用 `127.0.0.1`，不能用 `localhost`**
+
+`AppConfig.baseUrl` 在 Android 上返回 `http://127.0.0.1:8080`（**不是 `localhost`**）。
+
+原因：真机通过 `adb reverse` 连后端时，**Dart 的 HTTP 客户端解析 `localhost` 会优先走 IPv6（`::1`），
+而 `adb reverse` 建立的是 IPv4 隧道** —— 请求发不出去，App 停在启动页报「网络连接失败」。
+
+**这个坑极易误判**：从手机 `curl localhost:8080` 是**通的**（curl 会自动回退到 IPv4），
+于是很容易得出「隧道没问题、肯定是代码 bug」的错误结论，然后在错误方向排查很久。
+判断方法：`adb shell curl` 通但 App 不通时，优先怀疑地址族解析差异。
+
+### 国内 ROM 定位：`forceLocationManager: true` 是**必需项**
+
+`AndroidSettings(forceLocationManager: true)` **不能省**。
+
+geolocator 默认（`false`）走 Google Play Services：
+
+```java
+// geolocator_android FusedLocationClient.isLocationServiceEnabled
+LocationServices.getSettingsClient(context)
+    .checkLocationSettings(...)
+    .addOnCompleteListener((response) -> {
+        if (!response.isSuccessful()) {
+          listener.onLocationServiceError(ErrorCodes.locationServicesDisabled);
+```
+
+国内 ROM 上 GMS 这个调用会失败，插件**直接报「The location service on the device is disabled」**，
+而实际上系统定位完全正常（`dumpsys location` 显示 provider 全部 `enabled=true`、
+系统 `location_mode=3`、微信/高德都能定位）。
+
+设为 `true` 后改用原生 `LocationManagerClient`，判断条件是
+`isProviderEnabled(GPS) || isProviderEnabled(NETWORK)`，**不依赖 GMS**。
+
+配套的两处修复（都是真实缺陷）：
+- **不要用 `Geolocator.isLocationServiceEnabled()` 做前置拦截** —— 它同样走 GMS，会误杀正常用户。
+  正确做法是**直接尝试获取位置**，用真实结果判断。
+- **首个定位点超时给 45 秒**（GPS 冷启动需 30-60 秒，原先 10 秒会把「还在搜星」判成失败）；
+  并且**单次流错误不判死**（`cancelOnError: false`），MIUI 偶发报一次错后会自行恢复。
+
+### 网络形态与部署（决定「能不能拿出去跑」）
+
+| 形态 | 手机可达性 | 说明 |
+|------|-----------|------|
+| `adb reverse` | 仅插 USB 时 | 隧道会随插拔/息屏失效，且 `--list` 仍显示存在，容易误判 |
+| 手机热点（手机当 AP） | 热点范围内 | 手机一离开热点就断 |
+| 同一 WiFi（宿舍/家用） | 同网段 | 通常可用 |
+| **校园网** | ❌ **不可用** | 实测：同 `/17` 网段但 **100% 丢包** —— 开了 **AP 隔离（客户端隔离）**，这是校园网标准安全策略，无管理权限改不了 |
+| **公网服务器** | ✅ 随时随地（4G 也行） | **唯一能让 App 拿出去用的形态** |
+
+**结论**：调试期用 `adb reverse`；要「去操场跑」必须部署到公网，见
+`campus-run-backend/docs/deploy.md`（通用）与 `docs/deploy-oracle.md`（Oracle 免费层）。
+
+### 服务器地址**运行时可改**（不要只依赖编译期注入）
+
+- 登录页底部与**启动页错误态**都有「修改服务器地址」入口 → `/server-setting`。
+- 存储：`lib/core/storage/server_address_storage.dart`（`shared_preferences`）。
+- 优先级：本地保存 > 编译期 `--dart-define=API_BASE_URL` > 平台默认值。
+- ⚠️ **必须在每次请求前重写 baseUrl**（`BaseUrlInterceptor`）：`BaseOptions.baseUrl`
+  在构造 Dio 时就固定了，用户改地址后已存在的 Dio 实例不会自动更新。
+- 校验走 `normalizeServerAddress()`（自动补 `http://`、去尾斜杠、挡掉 `http://` 这类伪主机）。
+
+### 路由守卫的**死锁**（曾经很痛，务必保持）
+
+`resolveRedirect`（`lib/core/router/app_router.dart`，已提取为纯函数便于单测）：
+网络异常时**必须放行** `/splash`、`/login`、`/server-setting`。
+
+曾经写死 `if (auth.hasError) return '/splash'`，结果是：服务器地址填错或换了网络时，
+App 永远停在启动页一个「重试」按钮上，而**改地址的入口恰好在进不去的页面后面** ——
+用户完全无法自救，只能卸载重装。回归由 `test/router_guard_test.dart` 固化（11 个用例）。
+
+### 已知未修复：Riverpod `setState() called during build`
+
+真机运行时会打印：
+
+```
+══╡ EXCEPTION CAUGHT BY RIVERPOD ╞══
+setState() or markNeedsBuild() called during build.
+This UncontrolledProviderScope widget cannot be marked as needing to build
+  #31 MainShell.build (main_shell.dart:19)   ← ref.watch(hasNotificationsProvider)
+```
+
+- **触发点**：`MainShell` / `home_top_bar` 在 build 期间 watch
+  `hasNotificationsProvider` → `notificationUnreadCountProvider` → `notificationsProvider`
+  这条链（后者的 4 个依赖都是异步 provider）。
+- **严重性**：据 Riverpod 官方 issue [#4812](https://github.com/rrousselGit/riverpod/issues/4812)，
+  该异常抛出后 **`ProviderScheduler` 会永久冻结**，之后所有 provider 更新不再生效
+  （相关：[#4781](https://github.com/rrousselGit/riverpod/issues/4781)、
+  [#4805](https://github.com/rrousselGit/riverpod/issues/4805)、
+  [#4834](https://github.com/rrousselGit/riverpod/issues/4834)）。
+  症状是红点/通知偶尔不刷新。
+- **当前状态**：**未修复**。试过用「多层派生链 + 异步上游」的合成 widget 测试复现，
+  **未能触发** —— 说明它依赖整个 App 与导航时序，不是抽象链就能重现。
+  下次处理时建议：先在真机上稳定复现（记录触发前的操作路径），再逐个替换
+  `notificationsProvider` 的 4 个依赖做二分定位；不要盲目改 provider 结构。
+
+## 第二轮功能优化（进行中）
+
+计划全文见 [`docs/plan-round2.md`](docs/plan-round2.md)。范围：聊天提醒/免打扰、
+消息按 5 分钟分组、富媒体消息、运动记录为 0 的 bug、修改密码、性别年龄及可见性。
+
+### 已完成
+
+**数据库迁移 002**（`campus-run-backend/docs/migrations/002_profile_privacy_and_media.sql`）
+已在本地 MySQL 实测**三次**（验证幂等）：
+
+| 变更 | 说明 |
+|---|---|
+| `user.gender` / `age` | 可空；`NULL` = 未填写 |
+| `user.gender_public` / `age_public` | `TINYINT NOT NULL DEFAULT 0` —— **隐私默认关闭，公开必须用户主动开启** |
+| `user.token_invalid_before` | 改密后写入；**早于该时间签发的 refresh token 一律拒绝** |
+| `message.media_url` | `type=2`（图片）时必填 |
+| `message.content` | 改为**可空** —— 图片/表情消息可以没有文字 |
+| `chat_preference` 表 | 会话级免打扰，`UNIQUE(user_id, friend_id)` |
+
+写法约定：迁移用 `PREPARE` + `information_schema` 判断列是否存在来保证幂等。
+**`PREPARE` 串里只放最简单的 `SELECT 1`** —— 一旦在里面写带引号的中文提示，
+引号嵌套会让 MySQL 报 1064（已踩过）。
+
+⚠️ 同步维护三处 schema，漏一处会导致测试或新装库缺列：
+`docs/schema.sql`（新装生产库）、`campus-run-server/src/test/resources/schema.sql`（H2 测试）、
+`docs/migrations/*.sql`（既有库升级）。
+
+### 🐞 已踩过的坑：中文种子数据双重编码（勋章墙乱码）
+
+**症状**：App 勋章墙显示 `Ã¥Ë†ÂÃ¨Â·â10Ã¥âÂ¬Ã©âÂ¡Å` 这类乱码，而 `docs/schema.sql`
+文件本身是**干净的 UTF-8**（用字节验证：`校` = `E6 A0 A1`）。
+
+**成因**：只设了 `--character-set-server=utf8mb4`，**没设客户端连接字符集**。
+MySQL 的 `docker-entrypoint-initdb.d` 在执行 `schema.sql` 时用的是**连接字符集**，
+未指定时退回 **latin1** → UTF-8 的中文字节被当作 latin1 字符再编码成 utf8mb4 →
+每个汉字变成 2-3 个乱码字符（双重编码）。
+
+**修法（两层都要做）**：
+1. **防复发**：`docker-compose.deploy.yml` 的 mysql `command` 必须同时带
+   `--character-set-client=utf8mb4`、`--character-set-connection=utf8mb4`、
+   `--character-set-results=utf8mb4`。
+2. **修存量**：`docs/migrations/003_fix_badge_mojibake.sql` —— 用**权威文案覆盖**
+   而不是反向 `REPLACE`（双重编码有多种变体，反向替换容易漏），并清理
+   `user_badge` 里引用不存在 badge 的孤儿行（表现为接口返回 `name=null`）。
+
+**为什么一开始是好的、后来又坏了**：数据卷 `mysql-data` 只在**首次创建时**执行
+initdb 脚本。重建容器不会重跑；但一旦数据卷被删（或换新库）就会按当时的 compose 配置
+重新初始化 —— 所以这个 bug 会在"看起来什么都没改"的时候突然出现。
+
+**排查要点**：不要只看 `SELECT name FROM badge`（终端编码会二次误导），
+用 `SELECT id, HEX(name) FROM badge` 看真实字节，或从 API 取 JSON 后用 Python 打印。
+
+### 已完成（后端全部）
+
+| 接口 | 说明 |
+|---|---|
+| `PUT /api/v1/user/password` | 修改密码；成功后写 `token_invalid_before`，旧 refresh token 全部失效 |
+| `POST /api/v1/upload/chat-image` | 上传聊天图片（与头像共用同一套安全校验，落 `uploads/chat/`） |
+| `GET /api/v1/chat/preference/muted` | 静音名单 |
+| `PUT /api/v1/chat/preference?friendId=&muted=` | 设置/取消免打扰（幂等） |
+| `PUT /api/v1/user/me` | 扩展 `gender` / `age` / `genderPublic` / `agePublic` |
+| `GET /api/v1/user/{id}/profile` | 性别/年龄按可见性返回；不公开时字段为 `null` |
+
+**消息类型**（`MessageType` 枚举，服务端强制）：
+
+- `1`=文本：`content` 非空，`mediaUrl` 被**丢弃**（防止「文本+图」绕过媒体必填校验）
+- `2`=图片 / `3`=表情包：`mediaUrl` 必填，`content` 可空
+- **`type` 缺省按文本处理** —— 这是旧客户端兼容项，若把 `null` 当未知类型拒绝，
+  老版本 App 会**完全发不出消息**（这个 bug 被单测抓到过）
+- 离线推送正文：图片 `[图片]`、表情 `[表情]`（不能让通知栏空白）
+
+**免打扰的三条语义边界**（`ChatMutePushWiringTest` 固化）：
+
+1. 只拦「推送通知」，**不拦消息** —— 照常落库、照常在线送达
+2. 方向是「**接收方**静音**发送方**」，不是反过来
+3. 对方在线时本来就不推，免打扰判断不改变这一点
+
+后端测试：**303 个用例全绿**（282 基线 + 7 改密 + 8 富媒体 + 6 免打扰）。
+
+### 富媒体消息（已实现，前后端打通）
+
+| 类型 | `type` | 发送方式 | 渲染 |
+|---|---|---|---|
+| 文本 | 1 | 输入框 / emoji 面板 | 文字气泡 |
+| 图片 | 2 | 输入栏「+」→ 相册 → 上传 | 缩略图（最大 220，可点开） |
+| 表情包 | 3 | 表情面板「表情包」页签 | 小图（最大 120） |
+
+**关键实现要点**：
+
+- **图片分两步：先上传、再发消息**。上传失败时**不产生任何消息**，
+  比先插一条永远加载不出来的图片消息好得多。
+- **emoji 走文本消息**（它们是 Unicode 字符），**只有贴图才走 `type=3`**。
+  为每个 emoji 单独存一张图是浪费。
+- **`mediaUrl` 用 `asset:` 前缀**区分内置贴图与网络图片：
+  `asset:` → `Image.asset`，其它 → `Image.network`。
+- **贴图列表为空时自动隐藏「表情包」页签**，而不是显示一堆加载失败的破图。
+  项目当前**未附带贴图文件** —— 要启用只需把 PNG 放进 `assets/stickers/`、
+  在 pubspec 声明、并填入 `emoji_catalog.dart` 的 `stickerAssets`，**无需改 UI 代码**。
+- **媒体消息的 `content` 可以是空串**：模型把 `null` 兜底成 `''`，
+  否则服务端返回的图片消息会让**整个会话加载失败**（不是少显示一个字，是打不开）。
+- ⚠️ **重试必须带上原 `type` / `mediaUrl`**：漏了会把图片重试成一条**空的文本消息**
+  （content 本来就是 `''`），用户看到「重试成功」但对方收到空白 —— 比失败更糟。
+  这个 bug 我在实现时真实写出来过，已修并有测试固化。
+- 媒体地址缺失（脏数据）时显示明确的 `[图片]` / `[表情]` 占位，不留白块；
+  加载失败显示「图片加载失败」占位，不用留一个空白气泡。
+
+前端测试：**297 个用例全绿**（19 → 20 个文件）。
+
+### ⚠️ 构建 APK 必须用 ASCII 路径（否则 Gradle 直接失败）
+
+项目路径含中文（`C:\Users\沐瑾\...`），**从真实路径构建会失败**：
+
+```
+Execution failed for task ':app:compileFlutterBuildRelease'.
+> Cannot invoke "java.io.File.exists()" because "parent" is null
+Dart snapshot generator failed with exit code 255
+Could not write file to ...\build\...\ink_sparkle.frag
+```
+
+**正确做法**：用 `subst` 映射盘，且**必须在同一条命令里先建映射再构建**
+（`subst` 只在创建它的会话有效，新开的 pwsh 进程里 P: 不存在 —— 我因此白跑了两轮）：
+
+```powershell
+& subst P: /D 2>&1 | Out-Null
+& subst P: 'C:\Users\沐瑾\Desktop\project\campus-run-app' 2>&1 | Out-Null
+Set-Location 'P:\'
+flutter build apk --release --dart-define=API_BASE_URL=http://122.51.191.145:8080
+```
+
+> `C:\crun` 是指向 project 根目录的 junction，但 **junction 会被解析回真实中文路径**，
+> 不能解决这个问题；只有 `subst` 映射盘有效。
+
+### 消息提醒（已实现）
+
+| 组件 | 位置 |
+|---|---|
+| 决策规则（纯函数） | `lib/features/friends/utils/notify_policy.dart` |
+| 通知 + 震动封装 | `lib/features/friends/services/chat_notification_service.dart` |
+| 接入点 | `lib/app.dart` 的 `_handleIncomingMessage` |
+| 权限申请 | 进入聊天页时（不是启动时） |
+
+**决策优先级**（`decideNotifyAction`，17 个测试固化）：
+
+1. **自己发的消息 → 不提醒**（多端登录时会同步回来，给自己弹通知是明显错误）
+2. **未登录 → 不提醒**
+3. **正在看该会话 → 不提醒**（消息已在眼前）
+4. **该会话免打扰 → 只加红点，不震动不通知**
+5. 其余 → 震动 + 系统通知 + 红点
+
+**关键实现要点**：
+
+- **Android 必须开脱糖**：`isCoreLibraryDesugaringEnabled = true` +
+  `coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")`，
+  否则构建直接失败（`flutter_local_notifications` 依赖 Java 8+ API）。
+- **Manifest 需 `VIBRATE` 与 `POST_NOTIFICATIONS`**：缺 `VIBRATE` 时部分 ROM
+  会「有通知但不震动」，很难排查。
+- **通知插件调用全部 swallow 异常**：通知是锦上添花，绝不能影响消息接收与红点。
+- **媒体消息的通知正文用占位**（`[图片]` / `[表情]` / `[消息]`），
+  否则通知栏会出现一条**空白通知**。
+- 通知 id 用**发送方 id**：同一好友的多条消息覆盖同一条通知，不堆满通知栏。
+
+### 部署状态（2026-10-04 已上线）
+
+**服务器 `122.51.191.145:8080` 已运行本轮全部改动**，并已完成迁移 002 + 003。
+
+已实测通过的线上接口：
+
+| 验证项 | 结果 |
+|---|---|
+| 登录 | `code=0`，userId=1 |
+| `GET /user/me` | 返回 `gender:null, age:null, genderPublic:false, agePublic:false`（隐私默认关闭 ✅） |
+| `GET /user/{id}/profile` | 返回 `gender/age` + `relation` |
+| `GET /chat/preference/muted` | `data: []` |
+| `GET /user/{id}/badges` | `初跑10公里` / `十次运动` —— **乱码已修复** ✅ |
+| `GET /leaderboard` | 中文昵称正常、`relation` 正常、`gapToAhead/Behind` 正常 |
+| `POST /upload/chat-image`、`PUT /user/password`、`PUT /chat/preference` | 均已注册（非 404） |
+| `POST /admin/maintenance/repair-distance?dryRun=true` | `HTTP 200`，`scannedZeroDistance: 0` |
+
+> 服务器上**没有**「距离为 0」的历史记录，所以历史修复实际上无事可做
+> （接口已就绪，将来若出现可直接调用）。
+
+### 部署方式（重要：服务器是**源码构建**，不是传 jar）
+
+`docker-compose.deploy.yml` 的 app 服务是 `build: context: .`（多阶段 Dockerfile），
+**服务器上没有 `target/*.jar`** —— 部署必须上传**源码**，由 Docker 内 `mvn package` 编译。
+
+用 [`campus-run-backend/deploy-server.ps1`](campus-run-backend/deploy-server.ps1)：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File campus-run-backend\deploy-server.ps1 -Password '<ssh密码>'
+```
+
+⚠️ **踩过的坑**（脚本已规避，改脚本时注意）：
+
+- **`Compress-Archive` 不保留 Unix 权限**：解压出来的目录是 `drw-rw-r--`，
+  **缺 `x`（遍历）位**，导致 `cp`/`ls` 全部 `Permission denied`，
+  而 `touch`/`rm` 却正常 —— 极具误导性。解压后必须
+  `find . -type d -exec chmod 755 {} +`。
+- **本机是 Windows PowerShell 5.1**（不是 pwsh 7）：
+  - 不支持 `||` / `&&` 语句分隔符；
+  - **无 BOM 的 UTF-8 脚本会被当 GBK 读**，中文字符串全部乱码 → 脚本必须**纯 ASCII**，
+    中文逻辑放在上传的 bash 脚本里；
+  - `Install-Module Posh-SSH` 在非交互模式下失败，且要装到
+    `~/Documents/WindowsPowerShell/Modules`（**不是** `~/Documents/PowerShell/Modules`）。
+- `Posh-SSH` 的 `New-SSHSession` 需要 `-AcceptKey -Force`；`Invoke-SSHCommand`
+  的命令里若含中文/反引号，容易被 PowerShell 的 here-string 吃掉 —— 长命令写成文件再传。
+
+### 🐞 已踩过的坑：注销账号漏清理两张表（免打扰偏好 / 推送令牌）
+
+**症状**：调用 `DELETE /api/v1/user/me` 后，`chat_preference` 与 `device_token`
+里仍留着指向该用户 id 的行。
+
+**根因**：`UserServiceImpl.deleteAccount` 用**显式 DELETE**清理子表
+（刻意不用外键 `ON DELETE CASCADE`，让「注销会删掉哪些数据」在代码里一目了然），
+但新增表时**忘了同步加进去**：
+`chat_preference` 是本轮新加的免打扰表；
+`device_token` 的 `deleteByUserId` **方法早就写好了却一直没被调用**。
+
+**后果**：`device_token` 漏删最严重 —— 账号已注销，令牌仍指向该用户 id，
+推送会继续往**这台已经换人的手机**发通知，属于隐私泄露。
+`chat_preference` 漏删则让「注销会把数据删干净」这个合规承诺打折扣。
+
+**修法**：两处都补上，并且**两个方向都要删**
+（`chat_preference` 既要删「我设的」`user_id`，也要删「别人对我设的」`friend_id`）。
+
+回归测试：`DeleteAccountCleanupTest`（4 个）。
+**已验证测试真的能抓到 bug**：临时把清理调用改回缺失状态后，4 个测试**失败 3 个**
+（第 4 个「不误删别人令牌」与修复无关，本就该通过）。
+
+> **教训**：用显式 DELETE 而非外键级联时，「新增一张用户相关的表」这件事
+> 必须同时改三处 —— 建表 DDL、注销清理、以及对应的清理测试。
+> 漏掉第三处不会立刻报错，只会慢慢积累孤儿数据。
+
+### ⚠️ 部署必须用 tar（zip 会毁掉目录结构）
+
+`Compress-Archive` 在 Windows 上写的是**反斜杠**路径分隔符
+（`campus-run-common\src\main\`）。Linux 的 `unzip` 把反斜杠当**文件名字符**
+而非目录分隔符，解压出来目录结构是错的；而且它还会丢掉目录的 `x` 位，
+并且**只要有任何警告就返回 exit 1**（直接打断 `set -e` 脚本）。
+
+**正确做法**：用 Windows 自带的 `tar.exe`（bsdtar）打包，它写**正斜杠**，
+解压语义与 Unix 一致：
+
+```powershell
+tar -czf $Tar pom.xml campus-run-common campus-run-server   # 在暂存目录里执行
+# 打包后校验：tar -tzf 必须能列出 "campus-run-server/src/" 这样的正斜杠路径
+tar -xzf campus-run-src.tar.gz -C /home/ubuntu/campus-run-backend   # 直接解压覆盖
+```
+
+⚠️ **删旧的解压目录前必须先修权限**：上一次带坏权限解压出来的目录
+（缺 `x` 位，`drw-rw-r--`）会导致 `rm -rf` 报 `Permission denied`，
+而 `touch`/`rm` 单个文件却正常 —— 极具误导性。顺序必须是
+`chmod -R u+rwX` → `find -type d -exec chmod 755` → 再 `rm -rf`。
+
+### 待办
+
+- 真机装 APK 验收（`C:\Users\沐瑾\Desktop\campus-run.apk`）
+- **强烈建议改服务器密码**：当前密码是 `123456`，极弱；
+  服务器 22 端口对公网开放，存在被暴力破解风险（本轮已实测：SSH 密码认证可用，
+  说明**没有**禁止密码登录、也没有 fail2ban）。
+- 历史坏数据修复：服务器上无此类记录，无需执行。
+
+## 第三轮功能优化（进行中）
+
+### 已完成
+
+**管理员后台（找回密码）** —— `docs/migrations/004_admin_and_password_reset.sql`
+
+背景：App **没有邮箱字段、也没有短信服务**，用户忘记密码后毫无自救途径。
+硬上短信要实名 + 备案 + 按条付费，代价远大于收益。因此改为
+**给少量受信任账号开管理员权限**（`user.role = 1`），由管理员协助重置。
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/v1/admin/users` | 分页查用户，可按手机号 / 昵称 / 专属 ID 搜 |
+| `POST /api/v1/admin/users/{id}/reset-password` | 直接重置，返回**一次性**临时密码 |
+| `GET /api/v1/admin/password-reset-requests` | 申请列表（`status=0` 只看待处理） |
+| `POST /api/v1/admin/password-reset-requests/{id}/resolve` | 处理并重置 |
+| `POST /api/v1/admin/password-reset-requests/{id}/reject` | 拒绝 |
+| `POST /api/v1/password-reset-requests` | **用户侧提交申请（免登录）** |
+| `GET /api/v1/password-reset-requests/mine` | 查看自己最近一次申请状态 |
+
+**安全边界**（14 个测试固化，重点不是「能用」而是「不能越界」）：
+
+- 管理员**不能**通过这条路径重置自己的密码 —— 否则等于给管理员账号一个
+  「无需旧密码改自己密码」的后门，access token 一泄漏就能夺号。
+  错误信息会引导他去用「修改密码」。
+- 重置会写 `token_invalid_before`，**作废该用户全部 refresh token**
+  （与改密同一套机制；不写的话 30 天有效的旧 refresh token 仍能换新 access）。
+- 临时密码用 `SecureRandom` 生成，**字符集刻意去掉易混字符**（0/O、1/l/I）——
+  它是靠口头或文字转达的，「0 还是 O」会让用户反复输错、又来一轮重置。
+- **提交申请时，未注册手机号也返回成功**：否则这个免登录接口就成了
+  「哪些号注册过本 App」的批量探测器。
+- 同一用户只保留一条待处理申请，避免管理后台被同一个人刷屏。
+- 管理后台的用户列表**没有密码字段**（有测试用反射兜底，防止将来被「顺手」加上）。
+- 提交申请是 `POST` **精确路径**放行，不是 `/api/v1/password-reset-requests/**` ——
+  否则连 `/mine` 也变成匿名可访问。
+
+**前端**
+
+- `/forgot-password` —— 登录页密码框下方有「忘记密码？」入口。
+  **路由守卫必须放行它**（未登录 + 网络异常两种状态都要放行）：忘记密码的人本来就登不上，
+  守卫把人挡回登录页等于让他回到原点。已加入 `resolveRedirect` 的 `escapable` 集合。
+- `/admin` —— 两个页签：「找回密码申请」（有人等我）/「用户查询」（我要找某人）。
+  刻意分开：混在一页会让「还有几个人在等」被搜索框淹没。
+- 「我的」页 → 「忘记密码怎么办」；管理员额外看到「管理后台」入口。
+
+### 未读消息红点：从「一个布尔」改成「按好友计数」
+
+原来的 `FriendBadgeState` 只有一个 `hasUnreadMessage`，界面只能显示「有未读」——
+用户回到社区页**不知道该点谁**，必须挨个点开。
+
+现在存 `Map<int, int> unreadByFriend`（好友 id → 未读数），社区页每一行：
+
+- 头像右上角**小红点**（带白边，深色头像上也看得清）
+- 右侧**数字角标**（>99 显示 `99+`）
+- 副标题从 `ID xxx` 换成「**N 条新消息**」并高亮
+
+两套强度是刻意的：小圆点负责「一眼看到哪行」，数字负责「积了多少」。
+
+用 `select` 只订阅自己那一项，避免别人来消息时整张列表重建。
+
+**打开会话即清红点**：`chat_page` 进入时 `clearFriend(friendId)`；
+`app.dart` 在「正在看该会话」分支也清一次（否则读完消息回到列表仍有红点）。
+
+### 头像上传失败（code=6003）—— 根因是 Docker 卷权限
+
+**症状**：线上 `POST /api/v1/upload/avatar` 返回 `code=6003 图片保存失败`。
+
+**根因**：`Dockerfile` 里 `RUN chown -R app:app /app` 执行时 **`/app/uploads` 还不存在**，
+而 compose 把命名卷挂到该路径。Docker **首次**挂载命名卷时会用镜像里该路径的属主
+初始化卷内容；目录不存在时它**以 root 创建挂载点** → 容器以 `app` 用户运行
+→ `Files.createDirectories` 直接 EACCES。
+
+**修法**（两层）：
+1. `Dockerfile` 在 `chown` 之前 `mkdir -p /app/uploads/{avatar,chat}`。
+2. `FileStorageService` 加 `@PostConstruct` **启动自检**：
+   创建目录并探测可写性，失败时**打日志给出修复命令**（只告警不阻断启动 ——
+   上传坏了不该让聊天/跑步也起不来）。
+
+> 原来这个错误只报一句「图片保存失败，请重试」，排查要从日志翻到 IOException 堆栈；
+> 启动自检把「部署配置错了」和「用户传了坏图」区分开了。
+
+### App 自更新（后端 + 版本比较已完成，下载/安装 UI 待做）
+
+**绕不开的技术事实**：Android 8.0 起**禁止应用静默自安装**，任何方案都必须
+下载后弹系统安装器让用户点「安装」，首次还要授权「安装未知应用」。
+微信、淘宝也是这个流程。国内无法用 Google Play，而华为/小米/OPPO 各自一套 SDK，
+所以选**自建更新**（托管 APK + 版本接口）。
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/v1/app/version` | 版本信息（**免登录**，`/api/v1/app/**` 已放行） |
+| `GET /api/v1/app/download` | 下载 APK（流式 `FileSystemResource`，不读进内存） |
+
+配置（`application.yml` 顶层 `app-version:`，全部支持环境变量覆盖）：
+`latest` / `min-supported` / `changelog` / `apk-path`。
+**`latest` 留空 = 不提示更新**（接口仍可用）。
+
+关键设计：
+
+- 返回体里有 `apkReady`：**版本号有了但 APK 还没放好时，客户端不该提示** ——
+  否则用户点了下载拿到 404，体验比不提示更糟。
+- 下载用 `FileSystemResource` 而不是读进 `byte[]`：52MB 在 2C2G 服务器上
+  会造成明显 GC 压力，并发下载内存还会翻倍。
+- 未配置时返回 **404 而不是 500**：「没有可下载的包」对客户端等同于「暂时没有更新」。
+- 前端 `isVersionNewer()` 是**纯函数**（18 个测试）：这段逻辑错了会导致
+  「永远提示更新」或「永远不提示」，而这两种都要发两个版本才能在真机上验证一次。
+  边界情况包括：段数不同（`1.1` == `1.1.0`）、**多位数字按数值而非字典序**
+  （`1.10.0 > 1.9.0`，字典序会判反）、`1.0.0+3` 这类 build 后缀、空串。
+
+### ⚠️ 我犯过的错：PowerShell 数组切片把 application.yml 截断了
+
+用 `Select-String` 取行号再 `$lines[0..($idx.LineNumber-2)]` 插入配置段，
+**`Select-String` 返回的不是字符串**（是 `MatchInfo` 集合），
+`.LineNumber` 取不到值 → 切片退化 → **文件被截掉大半**。
+
+**教训**：
+- 改 YAML/配置文件**不要用行号切片**，用精确字符串替换；
+- **不要用 PowerShell 做多行文本编辑**，用 Python（本项目 `tools/` 下有先例）；
+- 出事后的救命稻草是 **`target/classes/`** —— 那里有上次编译输出的完整副本。
+  这次就是靠它恢复的（而且它比 git 里的版本更新）。
+- 插入锚点要按**真实缩进**写：本项目 `application.yml` 的顶层 key（`logging:` 等）
+  **没有缩进**，找 `'  logging:'` 会静默失败。
+
+### 待办
+
+- **部署**：迁移 004 + 新后端（头像修复、管理员后台、版本接口）
+- **自更新前端**：APK 下载进度 + 拉起系统安装器的 UI
+- 上传 APK 到服务器并设 `APP_VERSION_LATEST`（否则 `latest` 为空，客户端不提示更新）
+- 给定账号开管理员：`UPDATE user SET role = 1 WHERE phone IN (...)`
+
+后端（与 `campus-run-backend/README.md` 保持一致）：
+
+- 单端在线：多端同时登录的会话同步未实现。
+- **消息已支持富媒体**（`type` 1=文本 2=图片 3=表情包），前后端均已打通，
+  见上方「第二轮功能优化 → 富媒体消息」。
+- **内置贴图文件尚未附带**：`assets/stickers/` 为空，
+  表情面板会自动隐藏「表情包」页签（emoji 不受影响）。
+- 管理员暂无前端管理界面（围栏管理接口 `FenceController` 已齐备）。
+- 生产库需手工执行上面的 `message` 索引 DDL。
+
+前端 / 文档：
+
+- 首页天气文案为占位（后端暂无天气接口）。
+- 前端设计 token 已收敛：`lib/**` 中（除 `core/theme/theme_palette.dart` 与 `app_theme.dart` 这两个定义层）
+  **已无裸 `fontSize: <数字>` 与裸 `Color(0x...)`**；首页「运动目标 / 近期运动」已接入
+  `home_goal_section.dart` / `home_activity_list.dart`，`home_page.dart` 收敛为 274 行的编排层。
+  复核命令：`C:\dev\flutter\bin\cache\dart-sdk\bin\dart.exe analyze lib test`（2026-10-03 通过，`No issues found!`）。
+
+## 设计资产（必须保持可提交）
+
+| 路径 | 内容 |
+|------|------|
+| `campus-run-app/design/home_spec.png` | 首页信息架构优化规格板（组件拆分的依据） |
+| `campus-run-app/design/home_loaded.png` / `home_empty.png` | 首页数据态 / 空态 |
+| `前端页面示例/*.png` | 4 张 UI 示例（规格说明板、页面 1） |
+| `flutter-design/flutter_ui/` | 设计稿导出的参考工程（含字体、SVG、原始 Dart 稿） |
+
+这些 PNG 是设计资产，`.gitignore` **不得忽略**（见仓库根 `.gitignore` 末尾的显式说明）。

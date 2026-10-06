@@ -43,8 +43,34 @@ public class GoalServiceImpl implements GoalService {
         if (periodType == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "周期类型不合法");
         }
-        if (request.getEndDate().isBefore(request.getStartDate())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "结束日期必须不早于开始日期");
+
+        // weekly/monthly 的周期日期由服务端按 Asia/Shanghai 推导，客户端传值一律忽略；
+        // 只有 custom 才使用客户端日期。推导结果必须与 addProgress 的周期匹配语义一致
+        // （addProgress 用活动日期所在周的周一 / 当月 1 日作为 periodKey 与 [startDate, endDate] 比较）。
+        LocalDate startDate;
+        LocalDate endDate;
+        switch (periodType) {
+            case WEEKLY -> {
+                LocalDate monday = LocalDate.now(ZONE).with(DayOfWeek.MONDAY);
+                startDate = monday;
+                endDate = monday.plusDays(6);
+            }
+            case MONTHLY -> {
+                LocalDate today = LocalDate.now(ZONE);
+                startDate = today.withDayOfMonth(1);
+                endDate = today.withDayOfMonth(today.lengthOfMonth());
+            }
+            case CUSTOM -> {
+                startDate = request.getStartDate();
+                endDate = request.getEndDate();
+                if (startDate == null || endDate == null) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "custom 周期必须指定开始与结束日期");
+                }
+                if (endDate.isBefore(startDate)) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "结束日期必须不早于开始日期");
+                }
+            }
+            default -> throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "周期类型不合法");
         }
 
         // 悲观锁锁住用户行，避免并发下「先查后插」失效
@@ -52,7 +78,7 @@ public class GoalServiceImpl implements GoalService {
 
         Long existing = goalMapper.selectCount(new LambdaQueryWrapper<UserGoal>()
                 .eq(UserGoal::getUserId, userId)
-                .eq(UserGoal::getPeriodType, request.getPeriodType())
+                .eq(UserGoal::getPeriodType, periodType.getCode())
                 .eq(UserGoal::getStatus, GoalStatus.ACTIVE.getCode()));
         if (existing != null && existing > 0) {
             throw new BusinessException(ErrorCode.GOAL_EXISTS);
@@ -63,8 +89,8 @@ public class GoalServiceImpl implements GoalService {
         goal.setPeriodType(periodType.getCode());
         goal.setTargetDistanceMeters(request.getTargetDistanceMeters());
         goal.setCurrentDistanceMeters(0);
-        goal.setStartDate(request.getStartDate());
-        goal.setEndDate(request.getEndDate());
+        goal.setStartDate(startDate);
+        goal.setEndDate(endDate);
         goal.setStatus(GoalStatus.ACTIVE.getCode());
         goalMapper.insert(goal);
         return toResponse(goal);

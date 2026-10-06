@@ -4,12 +4,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/widgets/app_card.dart';
+import '../../../core/widgets/app_chip.dart';
+import '../../../core/widgets/app_section_title.dart';
 import '../../../core/widgets/empty_state.dart';
+import '../../../core/widgets/error_state.dart';
+import '../../../core/widgets/scrollable_center.dart';
 import '../../../data/models/goal.dart';
 import '../../../data/repositories/goal_repository.dart';
 import '../providers/goal_provider.dart';
 
 /// 运动目标：列表 + 新建 + 取消。
+///
+/// 三态：加载中（可下拉刷新）/ 错误（可重试）/ 空态（召唤语 + 可点动作）。
 class GoalsPage extends ConsumerWidget {
   const GoalsPage({super.key});
 
@@ -20,34 +27,52 @@ class GoalsPage extends ConsumerWidget {
       appBar: AppBar(title: const Text('运动目标')),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showCreate(context, ref),
+        tooltip: '新建目标',
         backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+        foregroundColor: AppColors.onPrimary,
         child: const Icon(Icons.add),
       ),
-      body: async.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, _) => _ErrorView(
-          message: err is ApiException ? err.message : '加载失败',
-          onRetry: () => ref.invalidate(goalListProvider),
-        ),
-        data: (goals) {
-          if (goals.isEmpty) {
-            return const EmptyState(
-              icon: Icons.flag_outlined,
-              title: '还没有运动目标',
-              subtitle: '设定一个目标，让运动更有方向',
-            );
-          }
-          return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(goalListProvider),
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 96),
-              itemCount: goals.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, i) => _GoalCard(goal: goals[i]),
+      body: RefreshIndicator(
+        onRefresh: () async => ref.invalidate(goalListProvider),
+        child: async.when(
+          loading: () => const ScrollableCenter(child: CircularProgressIndicator()),
+          error: (err, _) => ScrollableCenter(
+            child: ErrorState(
+              message: err is ApiException ? err.message : '目标加载失败，请稍后重试',
+              onRetry: () => ref.invalidate(goalListProvider),
             ),
-          );
-        },
+          ),
+          data: (goals) {
+            if (goals.isEmpty) {
+              return ScrollableCenter(
+                child: EmptyState(
+                  icon: Icons.flag_outlined,
+                  title: '还没有运动目标',
+                  subtitle: '设定一个目标，让每一次跑步都有方向',
+                  actionLabel: '设定第一个目标',
+                  onAction: () => _showCreate(context, ref),
+                ),
+              );
+            }
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.pageWide,
+                AppSpacing.smLg,
+                AppSpacing.pageWide,
+                96, // 给悬浮按钮留出空间
+              ),
+              children: [
+                const AppSectionTitle(title: '我的目标'),
+                const SizedBox(height: AppSpacing.smLg),
+                for (final goal in goals) ...[
+                  _GoalCard(goal: goal),
+                  const SizedBox(height: AppSpacing.smLg),
+                ],
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -70,9 +95,8 @@ class _GoalCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(20)),
+    return AppCard(
+      padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -81,15 +105,19 @@ class _GoalCard extends ConsumerWidget {
               Expanded(
                 child: Text(
                   '${_periodLabel(goal.periodType)}目标 · ${Formatters.distance(goal.targetDistanceMeters)}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  style: const TextStyle(
+                    fontSize: AppFontSize.title,
+                    fontWeight: AppFontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
               ),
               _StatusTag(status: goal.status),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: AppSpacing.gap14),
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppRadius.xs),
             child: LinearProgressIndicator(
               value: goal.progress,
               minHeight: 10,
@@ -97,27 +125,41 @@ class _GoalCard extends ConsumerWidget {
               color: goal.status == 1 ? AppColors.gold : AppColors.primary,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.smLg),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 '${Formatters.distance(goal.currentDistanceMeters)} / ${Formatters.distance(goal.targetDistanceMeters)}',
-                style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                style: const TextStyle(
+                  fontSize: AppFontSize.caption,
+                  color: AppColors.textSecondary,
+                ),
               ),
               Text(
                 '${(goal.progress * 100).toStringAsFixed(0)}%',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.primary),
+                style: const TextStyle(
+                  fontSize: AppFontSize.caption,
+                  fontWeight: AppFontWeight.bold,
+                  color: AppColors.primary,
+                ),
               ),
             ],
           ),
           if (goal.isActive) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.smLg),
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
                 onPressed: () => _cancel(context, ref, goal),
-                child: const Text('取消目标', style: TextStyle(color: AppColors.danger)),
+                child: const Text(
+                  '取消目标',
+                  style: TextStyle(
+                    fontSize: AppFontSize.body,
+                    fontWeight: AppFontWeight.medium,
+                    color: AppColors.danger,
+                  ),
+                ),
               ),
             ),
           ],
@@ -153,6 +195,10 @@ class _GoalCard extends ConsumerWidget {
     try {
       await ref.read(goalRepositoryProvider).cancel(goal.id);
       ref.invalidate(goalListProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('已取消该目标')));
+      }
     } on ApiException catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -175,9 +221,19 @@ class _StatusTag extends StatelessWidget {
       _ => ('进行中', AppColors.primary),
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
-      child: Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600)),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.gap10, vertical: AppSpacing.xxs),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: AppFontSize.caption,
+          fontWeight: AppFontWeight.bold,
+          color: color,
+        ),
+      ),
     );
   }
 }
@@ -192,6 +248,8 @@ class _GoalCreateSheet extends ConsumerStatefulWidget {
 class _GoalCreateSheetState extends ConsumerState<_GoalCreateSheet> {
   String _periodType = 'weekly';
   final _distanceController = TextEditingController();
+  DateTime? _customStart;
+  DateTime? _customEnd;
   bool _submitting = false;
 
   @override
@@ -200,33 +258,47 @@ class _GoalCreateSheetState extends ConsumerState<_GoalCreateSheet> {
     super.dispose();
   }
 
+  Future<void> _pickRange() async {
+    final now = DateTime.now();
+    final initial = _customStart != null && _customEnd != null
+        ? DateTimeRange(start: _customStart!, end: _customEnd!)
+        : DateTimeRange(start: now, end: now.add(const Duration(days: 6)));
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 1),
+      initialDateRange: initial,
+      helpText: '选择目标周期',
+    );
+    if (range != null) {
+      setState(() {
+        _customStart = range.start;
+        _customEnd = range.end;
+      });
+    }
+  }
+
   Future<void> _submit() async {
     final km = double.tryParse(_distanceController.text.trim());
     if (km == null || km <= 0) {
-      _show('请输入有效的目标距离');
+      _show('请输入大于 0 的目标距离（公里）');
       return;
     }
+    // 自定义目标才需客户端指定起止日期；周 / 月周期由服务端按当前周期推导。
+    final isCustom = _periodType == 'custom';
+    if (isCustom && (_customStart == null || _customEnd == null)) {
+      _show('请先选择自定义目标的开始与结束日期');
+      return;
+    }
+
     setState(() => _submitting = true);
     try {
-      final now = DateTime.now();
-      String? startDate;
-      String? endDate;
-      switch (_periodType) {
-        case 'weekly':
-          final monday = now.subtract(Duration(days: now.weekday - 1));
-          startDate = _fmt(DateTime(monday.year, monday.month, monday.day));
-          endDate = _fmt(DateTime(monday.year, monday.month, monday.day).add(const Duration(days: 6)));
-          break;
-        case 'monthly':
-          startDate = _fmt(DateTime(now.year, now.month, 1));
-          endDate = _fmt(DateTime(now.year, now.month + 1, 0));
-          break;
-      }
       await ref.read(goalRepositoryProvider).create(
             periodType: _periodType,
             targetDistanceMeters: (km * 1000).round(),
-            startDate: startDate,
-            endDate: endDate,
+            // weekly / monthly 不再强传日期，交由服务端推导（契约见 task-2）。
+            startDate: isCustom ? _fmt(_customStart!) : null,
+            endDate: isCustom ? _fmt(_customEnd!) : null,
           );
       if (mounted) Navigator.pop(context);
     } on ApiException catch (e) {
@@ -247,29 +319,56 @@ class _GoalCreateSheetState extends ConsumerState<_GoalCreateSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg + MediaQuery.of(context).viewInsets.bottom,
+      ),
       decoration: const BoxDecoration(
         color: AppColors.background,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('新建目标', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-          const SizedBox(height: 20),
-          const Text('目标周期', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-          const SizedBox(height: 10),
+          const Text(
+            '新建目标',
+            style: TextStyle(
+              fontSize: AppFontSize.headline,
+              fontWeight: AppFontWeight.bold,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.pageWide),
+          const Text(
+            '目标周期',
+            style: TextStyle(
+              fontSize: AppFontSize.body,
+              fontWeight: AppFontWeight.medium,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.gap10),
           Row(
             children: [
               _periodChip('weekly', '周目标'),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpacing.sm),
               _periodChip('monthly', '月目标'),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpacing.sm),
               _periodChip('custom', '自定义'),
             ],
           ),
-          const SizedBox(height: 20),
+          if (_periodType == 'custom') ...[
+            const SizedBox(height: AppSpacing.md),
+            _DateRangeField(
+              start: _customStart,
+              end: _customEnd,
+              onTap: _pickRange,
+            ),
+          ],
+          const SizedBox(height: AppSpacing.pageWide),
           TextField(
             controller: _distanceController,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -278,16 +377,24 @@ class _GoalCreateSheetState extends ConsumerState<_GoalCreateSheet> {
               prefixIcon: Icon(Icons.straighten, color: AppColors.textHint),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: AppSpacing.lg),
           FilledButton(
             onPressed: _submitting ? null : _submit,
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.primary,
+              foregroundColor: AppColors.onPrimary,
               minimumSize: const Size.fromHeight(52),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
             ),
             child: _submitting
-                ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.4,
+                      color: AppColors.onPrimary,
+                    ),
+                  )
                 : const Text('创建目标'),
           ),
         ],
@@ -296,41 +403,57 @@ class _GoalCreateSheetState extends ConsumerState<_GoalCreateSheet> {
   }
 
   Widget _periodChip(String value, String label) {
-    final selected = _periodType == value;
-    return Expanded(
-      child: ChoiceChip(
-        label: SizedBox(width: double.infinity, child: Text(label, textAlign: TextAlign.center)),
-        selected: selected,
-        onSelected: (_) => setState(() => _periodType = value),
-        selectedColor: AppColors.primary,
-        backgroundColor: AppColors.card,
-        labelStyle: TextStyle(
-          color: selected ? Colors.white : AppColors.textSecondary,
-          fontWeight: FontWeight.w600,
-        ),
-        showCheckmark: false,
-      ),
+    return AppChip(
+      label: label,
+      selected: _periodType == value,
+      onTap: () => setState(() => _periodType = value),
     );
   }
 }
 
-class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.message, required this.onRetry});
+class _DateRangeField extends StatelessWidget {
+  const _DateRangeField({required this.start, required this.end, required this.onTap});
 
-  final String message;
-  final VoidCallback onRetry;
+  final DateTime? start;
+  final DateTime? end;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(message, style: const TextStyle(color: AppColors.textSecondary)),
-          const SizedBox(height: 12),
-          ElevatedButton(onPressed: onRetry, child: const Text('重试')),
-        ],
+    final hasRange = start != null && end != null;
+    final label = hasRange ? '${_fmtDate(start!)} ~ ${_fmtDate(end!)}' : '选择日期范围';
+    return Material(
+      color: AppColors.card,
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.gap14,
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.date_range, size: 20, color: AppColors.textHint),
+              const SizedBox(width: AppSpacing.smLg),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: AppFontSize.body,
+                    color: hasRange ? AppColors.textPrimary : AppColors.textHint,
+                  ),
+                ),
+              ),
+              const Icon(Icons.chevron_right, size: 18, color: AppColors.textHint),
+            ],
+          ),
+        ),
       ),
     );
   }
+
+  String _fmtDate(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }

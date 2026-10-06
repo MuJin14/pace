@@ -1,0 +1,45 @@
+{
+	admin off
+
+	# ── 关键：默认 SNI ─────────────────────────────────────────
+	# Cloudflare 回源时可能不发送 SNI（或发送 IP），此时 Caddy 找不到
+	# 匹配的站点，会回退到自签的内部证书 —— Cloudflare 判定为无效证书，
+	# 直接返回 525（SSL Handshake Failed）。
+	# 指定 default_sni 后，未匹配的握手也会用这张 Cloudflare 源站证书，
+	# 从而与 Full / Full(strict) 模式兼容。
+	default_sni api.hibiscus.wiki
+
+	log {
+		output file /var/log/caddy/caddy.log {
+			roll_size 10MB
+			roll_keep 3
+		}
+		level INFO
+	}
+}
+
+# 主站点：域名访问
+api.hibiscus.wiki {
+	tls /certs/origin.crt /certs/origin.key
+
+	reverse_proxy app:8080 {
+		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10MB
+			roll_keep 3
+		}
+	}
+}
+
+# 兜底站点：用 IP 或未匹配 SNI 访问时，同样使用源站证书。
+# 没有这个块时，裸 IP 访问会拿到 Caddy 自签证书 ——
+# 而 Cloudflare 回源一旦走到这条路径就会 525。
+:443 {
+	tls /certs/origin.crt /certs/origin.key
+
+	reverse_proxy app:8080
+}

@@ -52,16 +52,42 @@ class ChatWebSocketHandlerTest {
         resp.setReceiverId(2L);
         resp.setContent("hi");
         resp.setTimestamp(123L);
-        when(messageService.sendMessage(1L, 2L, "hi")).thenReturn(resp);
+        // 请求里没带 type/mediaUrl：handler 必须按「文本消息」透传 null，
+        // 由 service 决定默认类型。这里断言 5 参重载被调用，且后两个为 null。
+        when(messageService.sendMessage(1L, 2L, "hi", null, null)).thenReturn(resp);
 
         handler.handleTextMessage(session,
                 new TextMessage("{\"type\":\"message\",\"data\":{\"receiverId\":2,\"content\":\"hi\"}}"));
 
-        verify(messageService).sendMessage(1L, 2L, "hi");
+        verify(messageService).sendMessage(1L, 2L, "hi", null, null);
         ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
         verify(session).sendMessage(captor.capture());
         assertTrue(captor.getValue().getPayload().contains("\"type\":\"ack\""));
         assertTrue(captor.getValue().getPayload().contains("\"messageId\":10"));
+    }
+
+    @Test
+    void handleTextMessage_imageMessage_passesTypeAndMediaUrl() throws Exception {
+        WebSocketSession session = session(1L);
+        ChatMessageResponse resp = new ChatMessageResponse();
+        resp.setMessageId(11L);
+        resp.setSenderId(1L);
+        resp.setReceiverId(2L);
+        resp.setType(2);
+        resp.setMediaUrl("http://host/uploads/chat/a.jpg");
+        resp.setTimestamp(124L);
+        when(messageService.sendMessage(1L, 2L, null, 2, "http://host/uploads/chat/a.jpg"))
+                .thenReturn(resp);
+
+        handler.handleTextMessage(session, new TextMessage(
+                "{\"type\":\"message\",\"data\":{\"receiverId\":2,\"type\":2,"
+                        + "\"mediaUrl\":\"http://host/uploads/chat/a.jpg\"}}"));
+
+        // 关键：type / mediaUrl 必须原样透传到 service，不能被丢掉
+        verify(messageService).sendMessage(1L, 2L, null, 2, "http://host/uploads/chat/a.jpg");
+        ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
+        verify(session).sendMessage(captor.capture());
+        assertTrue(captor.getValue().getPayload().contains("\"mediaUrl\""));
     }
 
     @Test

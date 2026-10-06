@@ -466,13 +466,38 @@ Authorization: Bearer <token>
     "total": 20, "page": 1, "size": 20,
     "list": [
       { "messageId": 100, "senderId": 9, "receiverId": 1, "content": "你好",
-        "type": 1, "delivered": 1, "timestamp": 1726992000000 }
+        "type": 1, "delivered": 1, "readAt": 1726992005000, "timestamp": 1726992000000 }
     ]
   }
 }
 ```
 
 - `type`：`1`=文本；`delivered`：`0`=未送达 `1`=已送达；`timestamp`：毫秒时间戳。
+- `readAt`：接收方已读时间（毫秒时间戳），`null` = 未读；发送方据此渲染「已读」。
+- **读取历史即视为已读**：拉取某好友的会话历史时，服务端先把该会话中「好友发给当前用户且 `read_at IS NULL`」的消息写入已读时间，
+  再返回结果（因此本次返回的条目 `readAt` 可能刚被写入），并向好友推送 WebSocket `read_receipt` 回执。
+  自己发出的消息永远不会被自己标记已读；该隐式标记幂等，没有新标记时不推送回执。
+
+### 16.1 标记消息已读（显式）
+
+```
+POST /api/v1/message/read?messageIds=100&messageIds=101
+Authorization: Bearer <token>
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| messageIds | long | 否 | 重复 query 参数，消息 ID 列表；为空时不标记任何消息，直接返回 0 |
+
+- 只有消息的接收方（该消息 `receiverId` = 当前用户）才有权标记；传入了任何一条不属于当前用户接收的消息，**整批拒绝**并返回 `403`（不做部分标记）。
+- 幂等：已读消息不会被重复写入 `readAt`，重复调用返回 `0`。
+- 返回 `data` 为本次实际由未读变为已读的消息条数。
+- 标记成功后向各发送方推送 WebSocket `read_receipt` 回执；对方离线时静默忽略，不影响已读落库。
+- 接口 16（拉取历史）已隐式完成标记，本接口用于前端显式补标（例如按本地消息 ID 精确回执）。
+
+```json
+{ "code": 0, "message": "成功", "data": 2 }
+```
 
 ## WebSocket 聊天
 
@@ -514,8 +539,19 @@ ws://<host>/ws?token=<jwt>
 
 ```json
 { "type": "message", "data": { "messageId": 100, "senderId": 9, "receiverId": 1,
-  "content": "你好", "type": 1, "delivered": 1, "timestamp": 1726992000000 } }
+  "content": "你好", "type": 1, "delivered": 1, "readAt": null, "timestamp": 1726992000000 } }
 ```
+
+已读回执（接收方读取会话后推送给原发送者）：
+
+```json
+{ "type": "read_receipt", "data": { "readerId": 1, "friendId": 9,
+  "messageIds": [100, 101], "readAt": 1726992005000 } }
+```
+
+- `readerId`：读取方（消息接收者）；`friendId`：会话对端（收到本回执的一方，即原发送者）；
+- `messageIds`：本次被标记为已读的消息 ID；`readAt`：标记时间（毫秒时间戳）。
+- 发送方收到后把对应消息渲染为「已读」；对方离线时不推送，不回补。
 
 发送确认（回给发送者）：
 
@@ -549,6 +585,7 @@ ws://<host>/ws?token=<jwt>
 | heartbeat | client→server | 心跳 |
 | message | server→client | 收到聊天消息（推送给接收者） |
 | ack | server→client | 发送结果确认（回给发送者） |
+| read_receipt | server→client | 已读回执，`data = { readerId, friendId, messageIds, readAt }` |
 | pong | server→client | 心跳响应 |
 | error | server→client | 错误，`data = { code, message }` |
 
@@ -672,9 +709,7 @@ Authorization: Bearer <token>
 ```json
 {
   "periodType": "weekly",
-  "targetDistanceMeters": 20000,
-  "startDate": "2026-09-22",
-  "endDate": "2026-09-27"
+  "targetDistanceMeters": 20000
 }
 ```
 
@@ -682,13 +717,19 @@ Authorization: Bearer <token>
 |------|------|------|------|
 | periodType | string | 是 | 周期类型：`weekly` / `monthly` / `custom` |
 | targetDistanceMeters | int | 是 | 目标距离（米），≥ 1 |
-| startDate | string | 是 | 开始日期 `yyyy-MM-dd` |
-| endDate | string | 是 | 结束日期 `yyyy-MM-dd`，不得早于开始日期 |
+| startDate | string | 否 | 开始日期 `yyyy-MM-dd`；`custom` 必填，`weekly`/`monthly` 由服务端推导，传了也会被忽略 |
+| endDate | string | 否 | 结束日期 `yyyy-MM-dd`；`custom` 必填，`weekly`/`monthly` 由服务端推导，传了也会被忽略 |
 
-- `periodType` 非法或结束日期早于开始日期返回 `400`。
+周期日期推导规则（时区 `Asia/Shanghai`）：
+
+- `weekly`：服务端推导为**本周一 ~ 本周日**；
+- `monthly`：服务端推导为**当月 1 日 ~ 当月月末**；
+- `custom`：必须同时指定 `startDate` 与 `endDate`，缺失任一返回 `400`；`endDate` 不得早于 `startDate`，否则返回 `400`。
+- `periodType` 非法返回 `400`。
 - 同周期下已存在进行中的目标返回 `5002`。
+- 推导结果与进度累加规则一致：运动日期所在周的周一（weekly）/ 当月 1 日（monthly）落在 `[startDate, endDate]` 内才累加目标进度。
 
-成功响应：
+成功响应（`startDate`/`endDate` 为服务端推导结果）：
 
 ```json
 {

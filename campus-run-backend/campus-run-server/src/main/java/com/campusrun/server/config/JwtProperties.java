@@ -8,7 +8,12 @@ import org.springframework.stereotype.Component;
 public class JwtProperties {
 
     private String secret;
-    private long expiration;
+
+    /** access token 有效期（秒），默认 2 小时。 */
+    private long expiration = 7200L;
+
+    /** refresh token 有效期（秒），默认 30 天。 */
+    private long refreshExpiration = 2592000L;
 
     public String getSecret() {
         return secret;
@@ -24,5 +29,13 @@ public class JwtProperties {
 
     public void setExpiration(long expiration) {
         this.expiration = expiration;
+    }
+
+    public long getRefreshExpiration() {
+        return refreshExpiration;
+    }
+
+    public void setRefreshExpiration(long refreshExpiration) {
+        this.refreshExpiration = refreshExpiration;
     }
 }

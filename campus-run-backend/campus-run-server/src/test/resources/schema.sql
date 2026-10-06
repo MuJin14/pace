@@ -7,6 +7,16 @@ CREATE TABLE user (
     password_hash VARCHAR(100) NOT NULL,
     nickname      VARCHAR(30)  NOT NULL,
     avatar_url    VARCHAR(255),
+      gender        TINYINT      DEFAULT NULL,
+      age           INT          DEFAULT NULL,
+      gender_public TINYINT      NOT NULL DEFAULT 0,
+      age_public    TINYINT      NOT NULL DEFAULT 0,
+      token_invalid_before TIMESTAMP  DEFAULT NULL,
+      -- 单设备登录：递增即让该用户所有已签发令牌失效。
+      -- 与生产迁移 005_single_device_login.sql 保持一致 ——
+      -- 测试库少了这两列会让 126 个用例因为 "Column not found" 报错。
+      token_version INT          NOT NULL DEFAULT 0,
+      device_id     VARCHAR(64)  DEFAULT NULL,
     role          TINYINT      NOT NULL DEFAULT 0,
     created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -22,6 +32,7 @@ CREATE TABLE activity (
     type             TINYINT      NOT NULL,
     mode             TINYINT      NOT NULL DEFAULT 1,
     invalid          TINYINT      NOT NULL DEFAULT 0,
+    invalid_reason   VARCHAR(64),
     fence_id         BIGINT,
     outside_ratio    DECIMAL(5,4),
     distance_meters  INT          NOT NULL DEFAULT 0,
@@ -37,6 +48,17 @@ CREATE TABLE activity (
     track_json       TEXT,
     created_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS scheduled_job_lock;
+
+CREATE TABLE scheduled_job_lock (
+    id          BIGINT      NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    job_name    VARCHAR(64) NOT NULL,
+    run_date    DATE        NOT NULL,
+    instance_id VARCHAR(64),
+    created_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_job_date UNIQUE (job_name, run_date)
 );
 
 DROP TABLE IF EXISTS leaderboard_stats;
@@ -75,8 +97,9 @@ CREATE TABLE message (
     id          BIGINT        NOT NULL AUTO_INCREMENT PRIMARY KEY,
     sender_id   BIGINT        NOT NULL,
     receiver_id BIGINT        NOT NULL,
-    content     VARCHAR(2000) NOT NULL,
+      content     VARCHAR(2000),
     type        TINYINT       NOT NULL DEFAULT 1,
+      media_url   VARCHAR(255),
     delivered   TINYINT       NOT NULL DEFAULT 0,
     read_at     TIMESTAMP,
     created_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -157,3 +180,50 @@ CREATE INDEX idx_fence_enabled ON campus_fence (enabled);
 CREATE INDEX idx_user_goal_status ON user_goal (user_id, status);
 CREATE INDEX idx_user_goal_period_status ON user_goal (user_id, period_type, status);
 CREATE INDEX idx_user_badge_badge ON user_badge (badge_id);
+
+-- 设备推送令牌。
+-- 注意：本文件每条建表语句前都必须有 DROP TABLE IF EXISTS —— 测试用
+-- DB_CLOSE_DELAY=-1 的内存库在同一 JVM 内会被多个 Spring 上下文复用，
+-- 脚本可能执行多次，少了 DROP 就会 "Table already exists" 导致整个上下文启动失败。
+DROP TABLE IF EXISTS device_token;
+
+CREATE TABLE device_token (
+    id         BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id    BIGINT       NOT NULL,
+    token      VARCHAR(255) NOT NULL,
+    platform   VARCHAR(16)  NOT NULL DEFAULT 'android',
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 令牌唯一：FCM 令牌可能在换账号后复用，必须能按令牌改写归属
+CREATE UNIQUE INDEX uk_device_token ON device_token (token);
+CREATE INDEX idx_device_token_user ON device_token (user_id);
+
+DROP TABLE IF EXISTS chat_preference;
+CREATE TABLE chat_preference (
+    id         BIGINT   NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id    BIGINT   NOT NULL,
+    friend_id  BIGINT   NOT NULL,
+    muted      TINYINT  NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_chat_pref_user_friend UNIQUE (user_id, friend_id)
+);
+CREATE INDEX idx_chat_pref_user_muted ON chat_preference (user_id, muted);
+
+DROP TABLE IF EXISTS password_reset_request;
+CREATE TABLE password_reset_request (
+    id         BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id    BIGINT       NOT NULL,
+    phone      VARCHAR(20)  NOT NULL,
+    nickname   VARCHAR(20),
+    status     TINYINT      NOT NULL DEFAULT 0,
+    note       VARCHAR(200),
+    handled_by BIGINT,
+    handled_at TIMESTAMP,
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_prr_status_created ON password_reset_request (status, created_at);
+CREATE INDEX idx_prr_user ON password_reset_request (user_id);

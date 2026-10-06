@@ -12,16 +12,19 @@ import java.util.List;
 
 public interface FriendshipMapper extends BaseMapper<Friendship> {
 
+    /**
+     * 搜索用户。
+     *
+     * <p>**故意不再排除自己和已有好友**：产品要的是微信式社交——搜到自己可以看自己的主页，
+     * 搜到好友可以直接进去聊天。因此这里只做关键词匹配，「要不要显示、显示成什么操作」
+     * 交给上层按 {@code UserRelation} 决定。
+     */
     @Select("""
             SELECT u.id AS userId, u.unique_id AS uniqueId, u.nickname AS nickname, u.avatar_url AS avatarUrl
             FROM user u
-            WHERE u.id != #{me}
-              AND (u.unique_id LIKE CONCAT('%', #{kw}, '%')
+            WHERE (u.unique_id LIKE CONCAT('%', #{kw}, '%')
                    OR u.nickname LIKE CONCAT('%', #{kw}, '%')
                    OR u.phone LIKE CONCAT('%', #{kw}, '%'))
-              AND u.id NOT IN (
-                  SELECT friend_id FROM friendship WHERE user_id = #{me} AND status = 1
-              )
             ORDER BY u.id
             LIMIT #{size} OFFSET #{offset}
             """)
@@ -31,13 +34,9 @@ public interface FriendshipMapper extends BaseMapper<Friendship> {
     @Select("""
             SELECT COUNT(*)
             FROM user u
-            WHERE u.id != #{me}
-              AND (u.unique_id LIKE CONCAT('%', #{kw}, '%')
+            WHERE (u.unique_id LIKE CONCAT('%', #{kw}, '%')
                    OR u.nickname LIKE CONCAT('%', #{kw}, '%')
                    OR u.phone LIKE CONCAT('%', #{kw}, '%'))
-              AND u.id NOT IN (
-                  SELECT friend_id FROM friendship WHERE user_id = #{me} AND status = 1
-              )
             """)
     long countSearch(@Param("me") long me, @Param("kw") String kw);
 
@@ -60,4 +59,16 @@ public interface FriendshipMapper extends BaseMapper<Friendship> {
             ORDER BY f.id DESC
             """)
     List<FriendRequestResponse> selectIncoming(@Param("me") long me);
+
+    /**
+     * 当前用户**已接受**的好友 id 列表。
+     *
+     * <p>未读计数接口用它拼出完整快照（所有好友都在响应里，未读为 0 给 0），
+     * 客户端才能据此清掉已经读过的红点。
+     */
+    @Select("""
+            SELECT friend_id FROM friendship
+            WHERE user_id = #{userId} AND status = 1
+            """)
+    List<Long> selectAcceptedFriendIds(@Param("userId") long userId);
 }

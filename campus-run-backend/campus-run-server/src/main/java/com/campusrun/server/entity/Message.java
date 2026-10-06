@@ -14,8 +14,12 @@ public class Message {
 
     private Long senderId;
     private Long receiverId;
+    /** 文本内容：type=1 时为实际文本；type=2/3 时可为 null 或辅助说明。 */
     private String content;
+    /** 消息类型：1=文本 2=图片 3=表情包，见 {@link com.campusrun.server.enums.MessageType}。 */
     private Integer type;
+    /** 媒体地址：type=2/3 时必填（图片或贴图的完整 URL）。 */
+    private String mediaUrl;
     private Integer delivered;
     private LocalDateTime readAt;
     private LocalDateTime createdAt;
@@ -58,6 +62,14 @@ public class Message {
 
     public void setType(Integer type) {
         this.type = type;
+    }
+
+    public String getMediaUrl() {
+        return mediaUrl;
+    }
+
+    public void setMediaUrl(String mediaUrl) {
+        this.mediaUrl = mediaUrl;
     }
 
     public Integer getDelivered() {

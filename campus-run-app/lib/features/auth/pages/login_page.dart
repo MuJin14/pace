@@ -5,9 +5,13 @@ import 'package:go_router/go_router.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/validators.dart';
-import '../../../core/widgets/primary_button.dart';
+import '../../../core/widgets/auth_scaffold.dart';
 import '../providers/auth_provider.dart';
 
+/// 登录页（极简白底风）。
+///
+/// 版式全部由 [AuthScaffold] 提供，本页只管字段与提交逻辑 ——
+/// 与注册页共享同一套版式，不会再出现两页样式不一致。
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
@@ -21,6 +25,19 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _passwordController = TextEditingController();
   bool _submitting = false;
 
+  /// 是否已同意用户协议与隐私政策。
+  ///
+  /// **为什么必须有**：本 App 收集定位与手机号，属《个人信息保护法》与
+  /// 应用商店审核的强制项 —— 必须由用户**主动勾选**表示同意，
+  /// 只放一个可点的文字链接是不够的。
+  bool _agreed = false;
+
+  /// 密码框是否正在被编辑 —— 驱动背景「闭眼」。
+  ///
+  /// 用户输密码时，跑道上的圆点压扁成一条横线，与上方的跑道弧线
+  /// 组成一只闭着的眼睛，表达「密码是安全的，没人看着」。
+  bool _passwordFocused = false;
+
   @override
   void dispose() {
     _phoneController.dispose();
@@ -30,6 +47,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_agreed) {
+      _show('请先阅读并同意《用户协议与隐私政策》');
+      return;
+    }
+    FocusScope.of(context).unfocus();
     setState(() => _submitting = true);
     try {
       await ref.read(authProvider.notifier).login(
@@ -47,129 +69,82 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   void _show(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.textPrimary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+        ),
+      ));
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: AppColors.primaryGradient,
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: SafeArea(
+    return AuthScaffold(
+      slogan: '记录你的每一段行程',
+      title: '欢迎回来',
+      subtitle: '登录后继续记录你的每一次运动',
+      eyeClosed: _passwordFocused,
+      formChildren: [
+        Form(
+          key: _formKey,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Spacer(flex: 2),
-              _brandHeader(),
-              const Spacer(flex: 2),
-              _formCard(context),
+              AuthField(
+                controller: _phoneController,
+                hint: '手机号',
+                icon: Icons.phone_android,
+                keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.next,
+                validator: Validators.validatePhone,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AuthField(
+                controller: _passwordController,
+                hint: '密码',
+                icon: Icons.lock_outline,
+                obscure: true,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _submit(),
+                validator: Validators.validatePassword,
+                // 进入密码框 → 背景闭眼
+                onFocusChange: (focused) =>
+                    setState(() => _passwordFocused = focused),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: AuthTextLink(
+                  label: '忘记密码？',
+                  fontSize: AppFontSize.caption,
+                  bold: false,
+                  onTap: () => context.push('/forgot-password'),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              AgreementCheckbox(
+                value: _agreed,
+                onChanged: (v) => setState(() => _agreed = v),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              AuthPrimaryButton(
+                label: '登录',
+                loading: _submitting,
+                onPressed: _submit,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AuthSwitchRow(
+                prompt: '还没有账号？',
+                actionLabel: '立即注册',
+                onAction: () => context.push('/register'),
+              ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _brandHeader() {
-    return Column(
-      children: [
-        Container(
-          width: 72,
-          height: 72,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.18),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
-          ),
-          child: const Icon(Icons.directions_run, size: 40, color: Colors.white),
-        ),
-        const SizedBox(height: 16),
-        const Text(
-          '校园跑',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 30,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 2,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '用脚步丈量青春',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.85),
-            fontSize: 15,
-          ),
-        ),
       ],
-    );
-  }
-
-  Widget _formCard(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-      decoration: const BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-      ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              '欢迎回来',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              '登录后开始记录你的每一次运动',
-              style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 24),
-            TextFormField(
-              controller: _phoneController,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                hintText: '手机号',
-                prefixIcon: Icon(Icons.phone_android, color: AppColors.textHint),
-              ),
-              validator: Validators.validatePhone,
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                hintText: '密码',
-                prefixIcon: Icon(Icons.lock_outline, color: AppColors.textHint),
-              ),
-              validator: Validators.validatePassword,
-            ),
-            const SizedBox(height: 28),
-            PrimaryButton(
-              label: '登录',
-              loading: _submitting,
-              onPressed: _submit,
-            ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: () => context.push('/register'),
-              child: const Text('没有账号？去注册'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

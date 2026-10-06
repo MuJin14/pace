@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>行迹 — 记录你的每一段行程</title>
+<meta name="description" content="行迹是一款运动记录与社交 App。轨迹、里程、配速、排行榜、好友约跑 —— 一次跑步，全都记下。">
+<meta name="theme-color" content="#FF8C42">
+<meta property="og:title" content="行迹">
+<meta property="og:description" content="记录你的每一段行程 · 轨迹记录 · 校园排行榜 · 好友约跑 · 勋章目标">
+<meta property="og:type" content="website">
+<!--
+  图标：内联 SVG，与 App 图标同一套几何 ——
+  一条对角行进曲线 + 起点圆点，橙色渐变底。
+  用 data: URI 是为了让 Worker 包不依赖额外文件（内联即可）。
+-->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23FF8C42'/%3E%3Cstop offset='1' stop-color='%23F0653A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M17 46 C25 46 27 32 33 24 C36 20 40 17 45 25' stroke='white' stroke-width='6.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='17' cy='46' r='5.5' fill='%23FFE3D2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=2.0.1">
+<!-- JS 可用标记：淡入等渐进增强样式只在此时生效，
+     避免脚本没跑时内容被 opacity:0 永久隐藏。 -->
+<script>document.documentElement.classList.add("js");</script>
+</head>
+<body>
+
+<!-- ══ 导航 ══ -->
+<header class="nav" id="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top">
+      <!-- 品牌标记：与 App 图标一致的「行进曲线 + 起点圆点」 -->
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none">
+          <rect width="64" height="64" rx="15" fill="url(#bg-grad)"/>
+          <defs>
+            <linearGradient id="bg-grad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#FF8C42"/>
+              <stop offset="1" stop-color="#F0653A"/>
+            </linearGradient>
+          </defs>
+          <path d="M17 46 C25 46 27 32 33 24 C36 20 40 17 45 25"
+                stroke="#fff" stroke-width="6.5" stroke-linecap="round"/>
+          <circle cx="17" cy="46" r="5.5" fill="#FFE3D2"/>
+        </svg>
+      </span>
+      <span class="brand-text">行迹<em>Xingji</em></span>
+    </a>
+    <nav class="nav-links">
+      <a href="#features">功能</a>
+      <a href="#showcase">界面</a>
+      <a href="#changelog">更新</a>
+      <a href="#faq">常见问题</a>
+    </nav>
+    <a class="btn btn-sm" href="https://dl.hibiscus.wiki:8443/downloads/campus-run.apk">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>
+      下载 App
+    </a>
+  </div>
+</header>
+
+<!-- ══ 首屏 ══ -->
+<section class="hero" id="top">
+  <div class="hero-bg" aria-hidden="true">
+    <span class="blob blob-1"></span>
+    <span class="blob blob-2"></span>
+    <span class="blob blob-3"></span>
+    <span class="grid-lines"></span>
+    <!-- 与 App 登录页同款的「会跑的跑道」装饰 -->
+    <svg class="track-deco" viewBox="0 0 1200 240" preserveAspectRatio="none">
+      <path d="M0 168 C 130 112, 250 214, 380 160 C 510 108, 630 210, 760 158 C 890 106, 1010 208, 1200 152"
+            fill="none" stroke="#FFDAC1" stroke-width="18" stroke-linecap="round"/>
+      <circle class="track-dot" cx="612" cy="196" r="13" fill="#FF8C42"/>
+    </svg>
+  </div>
+
+  <div class="wrap hero-inner">
+    <div class="hero-copy">
+      <span class="pill">
+        <span class="dot"></span>
+        已上线 · v<span id="ver">2.0.1</span>
+      </span>
+
+      <h1>
+        记录你的<br>
+        每一段<span class="hl">行程</span>
+      </h1>
+
+      <p class="lede">
+        行迹是一款运动记录与社交 App。<br>
+        轨迹、里程、配速、排行榜、好友约跑 —— 一次跑步，全都记下。
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-lg" href="https://dl.hibiscus.wiki:8443/downloads/campus-run.apk" id="dl">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>
+          <span>下载 Android 版</span>
+        </a>
+        <div class="cta-meta">
+          <span id="size">54.3 MB</span>
+          <span class="sep">·</span>
+          <span>Android 8.0+</span>
+          <span class="sep">·</span>
+          <span>免费</span>
+        </div>
+      </div>
+
+      <p class="install-hint">
+        下载页会提示「链接不安全」—— 那是源站证书不在公共信任列表里，点「继续访问」即可；<br>下载后点安装包，首次需允许「安装未知应用」——
+        <span class="muted">Android 系统要求，微信也是如此</span>
+      </p>
+    </div>
+
+    <div class="hero-visual">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <picture>
+          <source srcset="shots/home.webp" type="image/webp">
+          <img src="shots/home.png?v=2.0.1" alt="行迹首页界面" loading="eager"
+               onerror="this.parentElement.classList.add('no-shot')">
+        </picture>
+      </div>
+      <div class="float-card float-a">
+        <span class="fc-icon">🏅</span>
+        <b>连续打卡 7 天</b>
+      </div>
+      <div class="float-card float-b">
+        <span class="fc-icon">📍</span>
+        <b>轨迹已记录</b>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap stats">
+    <div class="stat"><b>52</b><span>个后端接口</span></div>
+    <div class="stat"><b>216</b><span>个 Java 文件</span></div>
+    <div class="stat"><b>400</b><span>个后端测试</span></div>
+    <div class="stat"><b>415</b><span>个前端测试</span></div>
+  </div>
+</section>
+
+<!-- ══ 功能 ══ -->
+<section class="section" id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">功能</span>
+      <h2>跑步这件事，我们做得比较认真</h2>
+      <p class="sec-sub">不是套个壳的计步器 —— 轨迹算法、防作弊、排行榜都从零写的。</p>
+    </div>
+
+    <div class="cards">
+      <article class="card">
+        <div class="ic ic-run">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/><path d="M9 21l2-5-2.5-2L10 9l3.5 1.5L16 14"/><path d="M14.5 10.5L19 8"/><path d="M8 12L3 11"/></svg>
+        </div>
+        <h3>轨迹记录</h3>
+        <p>锁屏、切后台都继续记录。信号差、楼间穿行时不会给你算出几百米的假里程。</p>
+      </article>
+
+      <article class="card">
+        <div class="ic ic-trophy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v6a5 5 0 01-10 0V4z"/><path d="M17 5h3v2a3 3 0 01-3 3M7 5H4v2a3 3 0 003 3"/><path d="M12 15v3M9 21h6M10 18h4"/></svg>
+        </div>
+        <h3>排行榜</h3>
+        <p>日榜、周榜、月榜、滚动 30 天。榜单上直接看到「距上一名还差多少米」，也能一键加好友。</p>
+      </article>
+
+      <article class="card">
+        <div class="ic ic-chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 01-8 8H7l-4 3v-5.5A8 8 0 018 4h5a8 8 0 018 8z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></svg>
+        </div>
+        <h3>好友与聊天</h3>
+        <p>发消息、发照片、发表情包。聊天气泡按 5 分钟间隔自动分组，未读红点直接标在具体那个人身上；退到后台也会收到提醒。</p>
+      </article>
+
+      <article class="card">
+        <div class="ic ic-goal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>
+        </div>
+        <h3>目标与勋章</h3>
+        <p>设置周目标或月目标，进度自动跟。连续打卡、累计里程会解锁勋章，攒着有成就感。</p>
+      </article>
+
+      <article class="card">
+        <div class="ic ic-map">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg>
+        </div>
+        <h3>运动围栏</h3>
+        <p>专属模式下按学校划定范围，在校园里跑才计入成绩 —— 操场刷圈不会被外面兜风的人超掉。</p>
+      </article>
+
+      <article class="card">
+        <div class="ic ic-notify">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 8-3 8h18s-3-1-3-8z"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
+        </div>
+        <h3>消息提醒</h3>
+        <p>新消息震动加通知；不想被打扰的人可以单独设免打扰，只留红点不弹窗。</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ══ 界面 ══ -->
+<section class="section section-alt" id="showcase">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">界面</span>
+      <h2>不花哨，但每个数字都看得清</h2>
+      <p class="sec-sub">配速、里程、用时是跑步时唯一想知道的东西，所以它们最大。</p>
+    </div>
+
+    <div class="shots">
+      <figure class="shot">
+        <picture><source srcset="shots/home.webp" type="image/webp"><img src="shots/home.png?v=2.0.1" alt="首页" loading="lazy"></picture>
+        <figcaption>首页</figcaption>
+      </figure>
+      <figure class="shot shot-wide">
+        <picture><source srcset="shots/spec.webp" type="image/webp"><img src="shots/spec.png?v=2.0.1" alt="信息架构" loading="lazy"></picture>
+        <figcaption>信息架构</figcaption>
+      </figure>
+      <figure class="shot">
+        <picture><source srcset="shots/home-empty.webp" type="image/webp"><img src="shots/home-empty.png?v=2.0.1" alt="空状态" loading="lazy"></picture>
+        <figcaption>空状态</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ══ 更新日志 ══ -->
+<section class="section" id="changelog">
+  <div class="wrap wrap-narrow">
+    <div class="sec-head">
+      <span class="eyebrow">更新</span>
+      <h2>持续在改</h2>
+      <p class="sec-sub">App 里会自动提示新版本，不用回官网重新下载。</p>
+    </div>
+
+    <ol class="clog">
+      <li class="clog-item">
+        <div class="clog-head">
+          <span class="clog-ver">1.8.0</span>
+          <span class="clog-date">单设备与权限</span>
+        </div>
+        <ul>
+          <li>同一账号只允许一台设备在线：新设备登录会立即把旧设备下线并说明原因</li>
+          <li>通知与定位权限改为启动时统一申请 —— 之前不进聊天页就拿不到通知权限，
+              表现为「只有打开聊天才看到消息」</li>
+          <li>修复退到后台收不到消息：之前 App 一进后台就停止心跳与重连，
+              连接被回收后期间的消息全部丢失</li>
+          <li>每个接口响应都附带最新版本信号，更新提示不再依赖客户端主动查询</li>
+        </ul>
+      </li>
+
+      <li class="clog-item">
+        <div class="clog-head">
+          <span class="clog-ver">1.7.4</span>
+          <span class="clog-date">更新提醒</span>
+        </div>
+        <ul>
+          <li>服务端在每次响应上主动下发更新信号，只要 App 连着服务器就能收到提醒</li>
+          <li>支持强制更新：低于指定版本时锁定「稍后」按钮</li>
+        </ul>
+      </li>
+
+      <li class="clog-item">
+        <div class="clog-head">
+          <span class="clog-ver">1.7.3</span>
+          <span class="clog-date">更新修复</span>
+        </div>
+        <ul>
+          <li>修复「有新版本却不提示」：更新检查原先只在登录后执行，
+              未登录永远不检查；弹窗还因用错上下文而从未真正显示过</li>
+        </ul>
+      </li>
+
+      <li class="clog-item">
+        <div class="clog-head">
+          <span class="clog-ver">1.7.2</span>
+          <span class="clog-date">图标统一</span>
+        </div>
+        <ul>
+          <li>修复桌面图标与应用信息页显示不一致的问题</li>
+          <li>自适应图标背景改为与位图一致的渐变</li>
+        </ul>
+      </li>
+
+      <li class="clog-item">
+        <div class="clog-head">
+          <span class="clog-ver">1.7.1</span>
+          <span class="clog-date">定位提速</span>
+        </div>
+        <ul>
+          <li>点「开始跑步」后等待时间大幅缩短</li>
+          <li>界面等到首个有效定位点再进入跑步页，计时同步开始</li>
+          <li>定位没开时给出明确原因和一键跳转设置</li>
+        </ul>
+      </li>
+
+      <li class="clog-item">
+        <div class="clog-head">
+          <span class="clog-ver">1.7.0</span>
+          <span class="clog-date">加载提速</span>
+        </div>
+        <ul>
+          <li>头像与聊天图片改用缩略图，流量与等待时间下降约 36 倍</li>
+          <li>网络抖动时自动重试，不再直接报「加载失败」</li>
+          <li>加载中显示首字占位，不再出现空洞后突然跳变</li>
+        </ul>
+      </li>
+
+      <li class="clog-item">
+        <div class="clog-head">
+          <span class="clog-ver">1.6.x</span>
+          <span class="clog-date">界面与账号</span>
+        </div>
+        <ul>
+          <li>登录/注册页重做，加入「会跑的跑道」动效</li>
+          <li>登录前须勾选同意《用户协议与隐私政策》，条文可点开</li>
+          <li>新增忘记密码申请，管理员协助重置</li>
+          <li>手机号校验与后端对齐，号段不对时给出准确提示</li>
+          <li>新增性别、年龄，并可分别设为公开或私密</li>
+        </ul>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ══ 常见问题 ══ -->
+<section class="section section-alt" id="faq">
+  <div class="wrap wrap-narrow">
+    <div class="sec-head">
+      <span class="eyebrow">常见问题</span>
+      <h2>下载与使用</h2>
+    </div>
+
+    <details class="qa" open>
+      <summary>怎么安装？</summary>
+      <p>
+        点页面上的「下载 Android 版」，下载完成后点开安装包。
+        首次安装 Android 会提示「不允许安装未知来源的应用」，
+        在弹窗里点「设置」→ 允许本站安装即可 —— 这是 Android 的通用要求，微信、淘宝安装时也一样。
+      </p>
+    </details>
+
+    <details class="qa">
+      <summary>怎么更新到新版本？</summary>
+      <p>
+        <b>不用回官网</b>。打开 App 后如果检测到新版本会自动提示，
+        点确认即可在 App 内完成下载与安装。
+        更新不会影响你的账号和已有的跑步记录。
+      </p>
+    </details>
+
+    <details class="qa">
+      <summary>为什么在应用商店搜不到？</summary>
+      <p>
+        目前只在官网直接分发，没有上架应用商店。
+        App 内置了更新检测，有新版会直接提示你。
+      </p>
+    </details>
+
+    <details class="qa">
+      <summary>点「开始跑步」后为什么要等一会儿？</summary>
+      <p>
+        在等第一个定位点。GPS 冷启动（刚打开定位、需要下载星历数据）通常要几秒到几十秒，
+        室内或楼间更久 —— 这是定位本身的物理限制，不是 App 卡住了。
+        界面会显示「正在获取定位…」，拿到点后自动进入跑步页，计时也从那一刻开始。
+        想更快定位：到室外或窗边，并确保下拉通知栏的「定位」开关是亮的。
+      </p>
+    </details>
+
+    <details class="qa">
+      <summary>跑步时能锁屏吗？</summary>
+      <p>
+        可以。App 使用前台服务持续记录，锁屏和切后台都不中断。
+        部分国产系统（MIUI / EMUI 等）需要把本应用的省电策略设为「无限制」，
+        否则系统会杀掉后台进程 —— 这是系统行为，不是 App 的问题。
+        定位权限建议设为「始终允许」。
+      </p>
+    </details>
+
+    <details class="qa">
+      <summary>走路为什么有时不计里程？</summary>
+      <p>
+        比散步还慢（低于约 0.6 m/s）或原地站着时，位移没有方向性，
+        算法会当成 GPS 漂移过滤掉 —— 这是为了避免静止时凭空产生几百米假里程。
+        跑步和骑行不受影响。站在不动时建议用「暂停」。
+      </p>
+    </details>
+
+    <details class="qa">
+      <summary>忘记密码怎么办？</summary>
+      <p>
+        在登录页点「忘记密码？」，填注册时的手机号提交申请，
+        管理员会帮你重置并给你一个临时密码。
+        拿到后登录，再去「我的 → 修改密码」改成自己的密码。
+      </p>
+    </details>
+
+    <details class="qa">
+      <summary>聊天里的图片会一直保留吗？</summary>
+      <p>
+        会保留较长时间，超过保留期的图片会清理，消息仍在但显示「图片已过期」。
+        想长期保存的照片，可以在聊天里点开图片后点右上角「保存」存到手机相册。
+      </p>
+    </details>
+
+    <details class="qa">
+      <summary>你们收集哪些信息？</summary>
+      <p>
+        账号信息（手机号、昵称、头像）、运动数据（轨迹坐标、距离、时长、配速、卡路里），
+        以及用于排查故障的客户端版本与错误日志。
+        定位权限<b>仅在你主动点击开始记录后</b>才采集，可在系统设置中随时关闭。
+        完整说明见 App 内「用户协议与隐私政策」（登录前即可查阅）。
+      </p>
+    </details>
+  </div>
+</section>
+
+<!-- ══ 底部下载 ══ -->
+<section class="final">
+  <div class="wrap wrap-narrow final-inner">
+    <h2>去跑一段吧</h2>
+    <p>一次跑步大概二十分钟，比刷二十分钟手机值得。</p>
+    <a class="btn btn-lg btn-invert" href="https://dl.hibiscus.wiki:8443/downloads/campus-run.apk">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>
+      下载 行迹 v<span id="ver2">2.0.1</span>
+    </a>
+    <p class="final-meta">Android 8.0+ · <span id="size2">54.3 MB</span> · 免费</p>
+  </div>
+</section>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <div class="foot-brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none">
+          <rect width="64" height="64" rx="15" fill="url(#bg-grad2)"/>
+          <defs>
+            <linearGradient id="bg-grad2" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#FF8C42"/>
+              <stop offset="1" stop-color="#F0653A"/>
+            </linearGradient>
+          </defs>
+          <path d="M17 46 C25 46 27 32 33 24 C36 20 40 17 45 25"
+                stroke="#fff" stroke-width="6.5" stroke-linecap="round"/>
+          <circle cx="17" cy="46" r="5.5" fill="#FFE3D2"/>
+        </svg>
+      </span>
+      <span>行迹</span>
+    </div>
+    <div class="foot-links">
+      <a href="https://dl.hibiscus.wiki:8443/downloads/campus-run.apk">下载</a>
+      <a href="#features">功能</a>
+      <a href="#changelog">更新</a>
+      <a href="#faq">常见问题</a>
+    </div>
+    <p class="foot-note">© <span id="yr">2026</span> 行迹 · 保留所有权利</p>
+  </div>
+</footer>
+
+
+
+
+
+
+
+
+
+
+<script>
+// 顶部跑道上的小圆点：轻微上下浮动，呼应 App 登录页的「会跑的跑道」。
+// 用 transform 而不是改 cy，避免每帧触发布局。
+(function () {
+  var dot = document.querySelector(".track-dot");
+  if (!dot) return;
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  var t = 0;
+  (function tick() {
+    t += 0.02;
+    dot.style.transform = "translateY(" + (Math.sin(t) * 6).toFixed(2) + "px)";
+    requestAnimationFrame(tick);
+  })();
+})();
+
+// 更新日志：滚到视口时依次淡入，给长页面一点节奏感。
+//
+// 三层兜底，确保内容**一定会显示**：
+//   1. 没有 IntersectionObserver（老浏览器）-> 直接全部显示；
+//   2. 观察器创建失败或抛异常 -> catch 里全部显示；
+//   3. 2 秒后仍未显示的（无头截图、浏览器打印、观察器静默失效）->
+//      强制显示。宁可少一个动画，也不能少一段内容。
+(function () {
+  var items = document.querySelectorAll(".clog-item");
+  if (!items.length) return;
+
+  function showAll() {
+    for (var i = 0; i < items.length; i++) items[i].classList.add("in");
+  }
+
+  if (!("IntersectionObserver" in window)) { showAll(); return; }
+
+  try {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          e.target.classList.add("in");
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.15 });
+    for (var j = 0; j < items.length; j++) io.observe(items[j]);
+  } catch (err) {
+    showAll();
+    return;
+  }
+
+  setTimeout(showAll, 2000);
+})();
+</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script id="ver-badge">
+// 版本徽章：静态值由部署时烘焙（兜底），再尝试从下载域拉最新值。
+// 拉取失败不影响页面 —— 静态值已经是正确的。
+fetch("https://dl.hibiscus.wiki:8443/version.json")
+  .then(function (r) { return r.json(); })
+  .then(function (d) {
+    if (!d || !d.latest) return;
+    ["ver", "ver2"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.textContent = d.latest;
+    });
+    if (d.apkSizeBytes) {
+      var mb = (d.apkSizeBytes / 1048576).toFixed(1) + " MB";
+      ["size", "size2"].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = mb;
+      });
+    }
+  })
+  .catch(function () { /* keep the static value */ });
+</script>
+</body>
+</html>

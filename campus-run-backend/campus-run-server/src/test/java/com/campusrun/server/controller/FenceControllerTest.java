@@ -90,7 +90,10 @@ class FenceControllerTest {
     void list_withUserToken_returns403() throws Exception {
         mockMvc.perform(get("/api/v1/admin/fences")
                         .header("Authorization", "Bearer " + userToken()))
-                .andExpect(status().isOk())
+                // 权限拒绝必须是 HTTP 403 本身，而不是 200 + body code=403。
+                // 原来断言 status().isOk() 等于把缺陷固化成了期望；
+                // 前端只按状态码判断时，200 会让它把「没权限」渲染成空态。
+                .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(403));
     }
 
@@ -117,7 +120,10 @@ class FenceControllerTest {
     void get_withUserToken_returns403() throws Exception {
         mockMvc.perform(get("/api/v1/admin/fences/1")
                         .header("Authorization", "Bearer " + userToken()))
-                .andExpect(status().isOk())
+                // 权限拒绝必须是 HTTP 403 本身，而不是 200 + body code=403。
+                // 原来断言 status().isOk() 等于把缺陷固化成了期望；
+                // 前端只按状态码判断时，200 会让它把「没权限」渲染成空态。
+                .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(403));
     }
 
@@ -160,7 +166,10 @@ class FenceControllerTest {
                         .header("Authorization", "Bearer " + userToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(fenceBody()))
-                .andExpect(status().isOk())
+                // 权限拒绝必须是 HTTP 403 本身，而不是 200 + body code=403。
+                // 原来断言 status().isOk() 等于把缺陷固化成了期望；
+                // 前端只按状态码判断时，200 会让它把「没权限」渲染成空态。
+                .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(403));
     }
 
@@ -206,7 +215,10 @@ class FenceControllerTest {
                         .header("Authorization", "Bearer " + userToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(fenceBody()))
-                .andExpect(status().isOk())
+                // 权限拒绝必须是 HTTP 403 本身，而不是 200 + body code=403。
+                // 原来断言 status().isOk() 等于把缺陷固化成了期望；
+                // 前端只按状态码判断时，200 会让它把「没权限」渲染成空态。
+                .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(403));
     }
 
@@ -236,7 +248,10 @@ class FenceControllerTest {
     void disable_withUserToken_returns403() throws Exception {
         mockMvc.perform(delete("/api/v1/admin/fences/1")
                         .header("Authorization", "Bearer " + userToken()))
-                .andExpect(status().isOk())
+                // 权限拒绝必须是 HTTP 403 本身，而不是 200 + body code=403。
+                // 原来断言 status().isOk() 等于把缺陷固化成了期望；
+                // 前端只按状态码判断时，200 会让它把「没权限」渲染成空态。
+                .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(403));
     }
 

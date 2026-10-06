@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/providers/account_scope.dart';
 import '../../../data/models/activity_summary.dart';
 import '../../../data/repositories/activity_repository.dart';
 
@@ -35,6 +36,9 @@ class ActivityListNotifier extends AsyncNotifier<List<ActivitySummary>> {
   Future<List<ActivitySummary>> build() async {
     _page = 1;
     _hasMore = true;
+    // 运动记录是「我的」，必须随账号重算：否则切账号后列表还是上一个人的记录。
+    // 同时它也让 build() 在切换账号时被重新执行（并按下面的逻辑重置分页状态）。
+    if (ref.watchUserId() == null) return const [];
     final result = await ref
         .read(activityRepositoryProvider)
         .page(page: 1, size: _size, type: _type);

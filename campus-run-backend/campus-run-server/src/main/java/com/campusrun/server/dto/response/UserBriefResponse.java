@@ -7,6 +7,20 @@ public class UserBriefResponse {
     private String nickname;
     private String avatarUrl;
 
+    /**
+     * 与当前登录用户的关系（self / friend / pending_outgoing / pending_incoming / none）。
+     * 客户端据此决定按钮：自己→看主页、好友→发消息、待通过→通过验证、无关系→添加好友。
+     */
+    private String relation;
+
+    public String getRelation() {
+        return relation;
+    }
+
+    public void setRelation(String relation) {
+        this.relation = relation;
+    }
+
     public Long getUserId() {
         return userId;
     }

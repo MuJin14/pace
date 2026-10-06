@@ -17,6 +17,9 @@ public class Activity {
     private Integer type;
     private Integer mode;
     private Integer invalid;
+
+    /** 判定为无效时的原因（来自 TrackAnomalyDetector.Anomaly.message()），便于人工复核与调参。 */
+    private String invalidReason;
     private Long fenceId;
     private BigDecimal outsideRatio;
     private Integer distanceMeters;
@@ -71,6 +74,14 @@ public class Activity {
 
     public void setInvalid(Integer invalid) {
         this.invalid = invalid;
+    }
+
+    public String getInvalidReason() {
+        return invalidReason;
+    }
+
+    public void setInvalidReason(String invalidReason) {
+        this.invalidReason = invalidReason;
     }
 
     public Long getFenceId() {

@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/widgets/app_card.dart';
+import '../../../core/widgets/app_metric_text.dart';
+import '../../../core/widgets/app_section_title.dart';
+import '../../../core/widgets/error_state.dart';
 import '../../../data/models/activity_detail.dart';
 import '../providers/activity_detail_provider.dart';
+import '../widgets/track_map.dart';
 
-/// 运动记录详情：核心指标 + 统计网格 + 轨迹占位。
+/// 运动记录详情：距离大数字 + 元信息 + 轨迹地图 + 三栏数据网格。
 class ActivityDetailPage extends ConsumerWidget {
   const ActivityDetailPage({super.key, required this.activityId});
 
@@ -20,232 +26,218 @@ class ActivityDetailPage extends ConsumerWidget {
       appBar: AppBar(title: const Text('运动详情')),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, _) => _ErrorView(
+        error: (err, _) => ErrorState(
           message: err is ApiException ? err.message : '加载失败，请稍后重试',
           onRetry: () => ref.invalidate(activityDetailProvider(activityId)),
         ),
-        data: (detail) => _DetailBody(detail: detail),
+        data: (detail) => _DetailBody(
+          detail: detail,
+          onEmptyTrackAction: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/activity');
+            }
+          },
+        ),
       ),
     );
   }
 }
 
 class _DetailBody extends StatelessWidget {
-  const _DetailBody({required this.detail});
+  const _DetailBody({required this.detail, required this.onEmptyTrackAction});
 
   final ActivityDetail detail;
+  final VoidCallback onEmptyTrackAction;
 
   @override
   Widget build(BuildContext context) {
     final color = detail.isRunning ? AppColors.run : AppColors.ride;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.page,
+        AppSpacing.md,
+        AppSpacing.page,
+        AppSpacing.lg,
+      ),
       children: [
-        _HeaderCard(detail: detail, color: color),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: _BigStat(label: '距离', value: Formatters.distance(detail.distanceMeters), color: color),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _BigStat(label: '时长', value: Formatters.duration(detail.durationSeconds), color: color),
-            ),
-          ],
+        AppCard(
+          child: Column(
+            children: [
+              _DistanceHeader(meters: detail.distanceMeters),
+              const SizedBox(height: AppSpacing.md),
+              _MetaRow(detail: detail, color: color),
+            ],
+          ),
         ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: _MetricCard(icon: Icons.speed, label: '平均配速', value: Formatters.pace(detail.avgPace)),
+        const SizedBox(height: AppSpacing.lg),
+        const AppSectionTitle(title: '运动轨迹'),
+        const SizedBox(height: AppSpacing.sm),
+        AppCard(
+          padding: EdgeInsets.zero,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            child: SizedBox(
+              height: 200,
+              child: TrackMap(
+                track: detail.track,
+                color: color,
+                emptyText: '这次运动没有留下轨迹',
+                emptyDescription: '下次跑起来，轨迹会显示在这里',
+                emptyActionLabel: '返回运动记录',
+                onEmptyAction: onEmptyTrackAction,
+              ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _MetricCard(icon: Icons.trending_up, label: '平均速度', value: Formatters.speed(detail.avgSpeed)),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _MetricCard(icon: Icons.local_fire_department, label: '卡路里', value: Formatters.calories(detail.calories)),
-            ),
-          ],
+          ),
         ),
-        const SizedBox(height: 16),
-        _TrackCard(detail: detail),
+        const SizedBox(height: AppSpacing.lg),
+        const AppSectionTitle(title: '运动数据'),
+        const SizedBox(height: AppSpacing.sm),
+        _StatsGrid(detail: detail),
       ],
     );
   }
 }
 
-class _HeaderCard extends StatelessWidget {
-  const _HeaderCard({required this.detail, required this.color});
+class _DistanceHeader extends StatelessWidget {
+  const _DistanceHeader({required this.meters});
+
+  final int meters;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppMetricText(
+      value: (meters / 1000).toStringAsFixed(2),
+      label: '公里',
+      valueSize: AppFontSize.metricLg,
+      labelSize: AppFontSize.caption,
+      labelColor: AppColors.textSecondary,
+      labelGap: AppSpacing.xxs,
+      color: AppColors.textPrimary,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      textAlign: TextAlign.center,
+    );
+  }
+}
+
+class _MetaRow extends StatelessWidget {
+  const _MetaRow({required this.detail, required this.color});
 
   final ActivityDetail detail;
   final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(24),
-      ),
+    final label = detail.isRunning ? '跑步' : '骑行';
+    return SizedBox(
+      height: 40,
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Container(
-            width: 54,
-            height: 54,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            child: Icon(detail.isRunning ? Icons.directions_run : Icons.directions_bike, color: Colors.white, size: 30),
-          ),
-          const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                detail.isRunning ? '跑步' : '骑行',
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                Formatters.dateTime(detail.startTime),
-                style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
-              ),
-            ],
-          ),
-          const Spacer(),
-          if (detail.invalid == 1)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.danger.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Text('无效', style: TextStyle(fontSize: 12, color: AppColors.danger, fontWeight: FontWeight.w600)),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BigStat extends StatelessWidget {
-  const _BigStat({required this.label, required this.value, required this.color});
-
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(20)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: color)),
-          const SizedBox(height: 4),
-          Text(label, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({required this.icon, required this.label, required this.value});
-
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 8),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(20)),
-      child: Column(
-        children: [
-          Icon(icon, color: AppColors.primary, size: 22),
-          const SizedBox(height: 10),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-          ),
-          const SizedBox(height: 4),
-          Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-        ],
-      ),
-    );
-  }
-}
-
-class _TrackCard extends StatelessWidget {
-  const _TrackCard({required this.detail});
-
-  final ActivityDetail detail;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(20)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('运动轨迹', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-          const SizedBox(height: 16),
-          Container(
-            height: 160,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+          Expanded(
+            child: Row(
               children: [
-                Icon(Icons.route, color: AppColors.primary.withValues(alpha: 0.5), size: 40),
-                const SizedBox(height: 8),
-                Text(
-                  detail.track.isEmpty ? '暂无轨迹数据' : '共 ${detail.track.length} 个轨迹点',
-                  style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                Icon(
+                  detail.isRunning
+                      ? Icons.directions_run
+                      : Icons.directions_bike,
+                  color: color,
+                  size: 20,
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  '地图展示功能即将上线',
-                  style: TextStyle(fontSize: 12, color: AppColors.textHint),
+                const SizedBox(width: AppSpacing.sm),
+                Flexible(
+                  child: Text(
+                    '$label · ${Formatters.dateTimeCn(detail.startTime)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: AppFontSize.body,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
+          if (detail.invalid == 1)
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: AppSpacing.xs,
+              ),
+              decoration: BoxDecoration(
+                color: AppColors.danger,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+              ),
+              child: const Text(
+                '无效',
+                style: TextStyle(
+                  fontSize: AppFontSize.caption,
+                  color: AppColors.onPrimary,
+                  fontWeight: AppFontWeight.bold,
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.message, required this.onRetry});
+class _StatsGrid extends StatelessWidget {
+  const _StatsGrid({required this.detail});
 
-  final String message;
-  final VoidCallback onRetry;
+  final ActivityDetail detail;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+    return AppCard(
+      child: Row(
         children: [
-          Text(message, style: const TextStyle(color: AppColors.textSecondary)),
-          const SizedBox(height: 12),
-          ElevatedButton(onPressed: onRetry, child: const Text('重试')),
+          Expanded(
+            child: _StatCell(
+              value: Formatters.duration(detail.durationSeconds),
+              label: '时长',
+            ),
+          ),
+          Expanded(
+            child: _StatCell(
+              value: Formatters.pace(detail.avgPace),
+              label: '配速',
+            ),
+          ),
+          Expanded(
+            child: _StatCell(
+              value: Formatters.calories(detail.calories),
+              label: '消耗',
+            ),
+          ),
         ],
       ),
+    );
+  }
+}
+
+class _StatCell extends StatelessWidget {
+  const _StatCell({required this.value, required this.label});
+
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppMetricText(
+      value: value,
+      label: label,
+      valueSize: AppFontSize.headline,
+      valueWeight: AppFontWeight.medium,
+      labelSize: AppFontSize.caption,
+      labelColor: AppColors.textSecondary,
+      labelGap: AppSpacing.xs,
+      color: AppColors.textPrimary,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      textAlign: TextAlign.center,
     );
   }
 }

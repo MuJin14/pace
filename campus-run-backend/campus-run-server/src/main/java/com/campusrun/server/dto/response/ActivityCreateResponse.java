@@ -9,6 +9,9 @@ public class ActivityCreateResponse {
     private Integer type;
     private Integer mode;
     private Integer invalid;
+
+    /** 判为无效的原因（反作弊命中项）；有效记录为 null。 */
+    private String invalidReason;
     private Integer distanceMeters;
     private Integer durationSeconds;
     private BigDecimal avgSpeed;
@@ -47,6 +50,14 @@ public class ActivityCreateResponse {
 
     public void setInvalid(Integer invalid) {
         this.invalid = invalid;
+    }
+
+    public String getInvalidReason() {
+        return invalidReason;
+    }
+
+    public void setInvalidReason(String invalidReason) {
+        this.invalidReason = invalidReason;
     }
 
     public Integer getDistanceMeters() {

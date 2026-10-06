@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -75,4 +76,43 @@ public interface LeaderboardMapper extends BaseMapper<LeaderboardStat> {
 
     @Delete("DELETE FROM leaderboard_stats WHERE scope = #{scope} AND type = #{type} AND period < #{beforePeriod}")
     int deleteExpired(@Param("scope") String scope, @Param("type") int type, @Param("beforePeriod") String beforePeriod);
+
+    // ── 历史数据修复用：按 scope/period 先删后重算 ──────────────────────
+    //
+    // 为什么必须重算而不是「把差额加回去」：差额修复要求逐条确认该记录当初
+    // 有没有真正写进聚合表（历史 bug 可能同时影响了写入链路），
+    // 对账既脆弱又难验证。先删该 period 再按当前 activity 重新聚合，
+    // 结果只由 activity 唯一决定，**幂等且可重复执行**。
+
+    @Delete("DELETE FROM leaderboard_stats WHERE scope = #{scope} AND period = #{period} AND type = #{type}")
+    int deleteByPeriod(@Param("scope") String scope,
+                       @Param("period") String period,
+                       @Param("type") int type);
+
+    @Insert("""
+            INSERT INTO leaderboard_stats (user_id, scope, period, type, distance_meters)
+            SELECT user_id, #{scope}, #{period}, #{type}, SUM(distance_meters)
+            FROM activity
+            WHERE type = #{type} AND invalid = 0
+              AND start_time >= #{from} AND start_time < #{to}
+            GROUP BY user_id
+            """)
+    int insertByPeriod(@Param("scope") String scope,
+                       @Param("period") String period,
+                       @Param("type") int type,
+                       @Param("from") LocalDateTime from,
+                       @Param("to") LocalDateTime to);
+
+    /**
+     * 全部「有效运动」的日期（去重），用于按日/周/月重建榜单。
+     *
+     * <p>用 `CAST(... AS DATE)` 而不是 MySQL 的 `DATE_FORMAT`：
+     * 后者在 H2（测试库）里不存在，会让整个测试跑不起来。
+     * 返回 {@code LocalDate} 由 MyBatis 直接映射，也比字符串更安全。
+     */
+    @Select("""
+            SELECT DISTINCT CAST(start_time AS DATE) AS d FROM activity
+            WHERE invalid = 0 AND start_time IS NOT NULL
+            """)
+    List<LocalDate> selectAllActivityDates();
 }

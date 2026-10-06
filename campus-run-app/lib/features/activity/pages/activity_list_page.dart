@@ -5,7 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/widgets/app_card.dart';
+import '../../../core/widgets/app_chip.dart';
 import '../../../core/widgets/empty_state.dart';
+import '../../../core/widgets/error_state.dart';
 import '../../../core/widgets/scrollable_center.dart';
 import '../../../data/models/activity_summary.dart';
 import '../providers/activity_list_provider.dart';
@@ -35,18 +38,20 @@ class _ActivityListPageState extends ConsumerState<ActivityListPage> {
               child: listAsync.when(
                 loading: () => const ScrollableCenter(child: CircularProgressIndicator()),
                 error: (err, _) => ScrollableCenter(
-                  child: _ErrorView(
+                  child: ErrorState(
                     message: err is ApiException ? err.message : '加载失败，请稍后重试',
                     onRetry: () => ref.invalidate(activityListProvider),
                   ),
                 ),
                 data: (list) {
                   if (list.isEmpty) {
-                    return const ScrollableCenter(
+                    return ScrollableCenter(
                       child: EmptyState(
                         icon: Icons.directions_run,
                         title: '还没有运动记录',
-                        subtitle: '去首页开始你的第一次跑步或骑行吧',
+                        subtitle: '去跑一跑，留下你的第一条轨迹',
+                        actionLabel: '去跑步',
+                        onAction: () => context.push('/start-run'),
                       ),
                     );
                   }
@@ -77,17 +82,32 @@ class _ActivityListPageState extends ConsumerState<ActivityListPage> {
       },
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.page,
+          AppSpacing.md,
+          AppSpacing.page,
+          AppSpacing.lg,
+        ),
         itemCount: list.length + (hasMore ? 1 : 0),
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
         itemBuilder: (context, index) {
           if (index == list.length) {
             return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
               child: Center(
                 child: loadingMore
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
-                    : const Text('上拉加载更多', style: TextStyle(fontSize: 13, color: AppColors.textHint)),
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.4),
+                      )
+                    : const Text(
+                        '上拉加载更多',
+                        style: TextStyle(
+                          fontSize: AppFontSize.caption,
+                          color: AppColors.textHint,
+                        ),
+                      ),
               ),
             );
           }
@@ -111,32 +131,29 @@ class _FilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.page,
+        AppSpacing.sm,
+        AppSpacing.page,
+        AppSpacing.sm,
+      ),
       child: Row(
         children: [
-          _chip(context, null, '全部'),
-          const SizedBox(width: 8),
-          _chip(context, 1, '跑步'),
-          const SizedBox(width: 8),
-          _chip(context, 2, '骑行'),
+          _chip(null, '全部'),
+          const SizedBox(width: AppSpacing.sm),
+          _chip(1, '跑步'),
+          const SizedBox(width: AppSpacing.sm),
+          _chip(2, '骑行'),
         ],
       ),
     );
   }
 
-  Widget _chip(BuildContext context, int? value, String label) {
-    final selected = this.selected == value;
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onChanged(value),
-      selectedColor: AppColors.primary,
-      backgroundColor: AppColors.card,
-      labelStyle: TextStyle(
-        color: selected ? Colors.white : AppColors.textSecondary,
-        fontWeight: FontWeight.w600,
-      ),
-      showCheckmark: false,
+  Widget _chip(int? value, String label) {
+    return AppChip(
+      label: label,
+      selected: selected == value,
+      onTap: () => onChanged(value),
     );
   }
 }
@@ -150,88 +167,83 @@ class _ActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = item.isRunning ? AppColors.run : AppColors.ride;
-    return Material(
-      color: AppColors.card,
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
-                child: Icon(item.isRunning ? Icons.directions_run : Icons.directions_bike, color: color, size: 24),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    return AppCard(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              item.isRunning ? Icons.directions_run : Icons.directions_bike,
+              color: color,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        Text(
-                          item.isRunning ? '跑步' : '骑行',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-                        ),
-                        const SizedBox(width: 8),
-                        if (item.avgPace != null)
-                          Text(
-                            '配速 ${Formatters.pace(item.avgPace)}',
-                            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
                     Text(
-                      Formatters.dateTime(item.startTime),
-                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      item.isRunning ? '跑步' : '骑行',
+                      style: const TextStyle(
+                        fontSize: AppFontSize.title,
+                        fontWeight: AppFontWeight.medium,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
+                    const SizedBox(width: AppSpacing.sm),
+                    if (item.avgPace != null)
+                      Text(
+                        '配速 ${Formatters.pace(item.avgPace)}',
+                        style: const TextStyle(
+                          fontSize: AppFontSize.caption,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
                   ],
                 ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    Formatters.distance(item.distanceMeters),
-                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  Formatters.dateTime(item.startTime),
+                  style: const TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textSecondary,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    Formatters.duration(item.durationSeconds),
-                    style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                  ),
-                ],
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                Formatters.distance(item.distanceMeters),
+                style: const TextStyle(
+                  fontSize: AppFontSize.title,
+                  fontWeight: AppFontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
               ),
-              const SizedBox(width: 4),
-              const Icon(Icons.chevron_right, color: AppColors.textHint, size: 20),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                Formatters.duration(item.durationSeconds),
+                style: const TextStyle(
+                  fontSize: AppFontSize.caption,
+                  color: AppColors.textSecondary,
+                ),
+              ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(message, style: const TextStyle(color: AppColors.textSecondary)),
-          const SizedBox(height: 12),
-          ElevatedButton(onPressed: onRetry, child: const Text('重试')),
+          const SizedBox(width: AppSpacing.xs),
+          const Icon(Icons.chevron_right, color: AppColors.textHint, size: 20),
         ],
       ),
     );

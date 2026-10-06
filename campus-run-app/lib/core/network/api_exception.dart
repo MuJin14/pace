@@ -21,6 +21,21 @@ class ApiException implements Exception {
       final code = data['code'] as int;
       return ApiException(code, resolveErrorMessage(code, data['message'] as String? ?? '请求失败'));
     }
+    // 走到这里说明响应体里没有可用的 code —— 通常意味着**响应不是我们的后端**。
+    //
+    // 真实事故：真机上注册收到 `{"code":400,"message":"参数错误"}`，
+    // 但服务器日志里根本没有这条请求（8080 直连，不经过任何代理）。
+    // 只报一个警告码时完全无法定位是谁回的，所以把响应头一并打出来 ——
+    // Server / Via / X-Powered-By 能直接指出响应方。
+    if (e.response != null) {
+      final h = e.response!.headers;
+      // ignore: avoid_print
+      print('[网络] 非标准响应体: status=${e.response!.statusCode} '
+          'type=${e.type} data=$data '
+          'server=${h.value('server')} via=${h.value('via')} '
+          'ct=${h.value('content-type')} powered=${h.value('x-powered-by')} '
+          'date=${h.value('date')}');
+    }
     if (e.type == DioExceptionType.connectionTimeout ||
         e.type == DioExceptionType.receiveTimeout ||
         e.type == DioExceptionType.sendTimeout ||

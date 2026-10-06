@@ -7,3 +7,13 @@ target/
 .vscode/
 .DS_Store
 application-local.yml
+
+# 部署密钥与证书 —— 绝不能提交
+# certs/ 存放 Cloudflare 源站证书，其中 origin.key 是私钥，
+# 泄露等于别人可以冒充你的站点；.env 含数据库口令与 JWT 密钥。
+certs/
+*.key
+*.pem
+.env
+.env.*
+!.env.example

@@ -28,7 +28,8 @@ public class LeaderboardController {
             @RequestParam(required = false) Integer type,
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "20") long size) {
-        return Result.success(leaderboardService.getBoard(scope, period, type, page, size));
+        Long userId = SecurityUtils.getCurrentUserId();
+        return Result.success(leaderboardService.getBoard(scope, period, type, page, size, userId));
     }
 
     @GetMapping("/my-rank")

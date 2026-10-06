@@ -1,0 +1,456 @@
+/* ═══════════════════════════════════════════════════════════════
+   校园跑官网
+   配色与 App 的 theme_palette.dart 保持一致：
+     主色 #FF8C42 / 深 #E56A1E / 底 #FDF9F5 / 文字 #2E2419
+   不引入任何外部字体与 JS 库 —— 官网要能在任何网络下秒开。
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  --primary: #FF8C42;
+  --primary-dark: #E56A1E;
+  --primary-light: #FFDAC1;
+  --secondary: #7DD3C0;
+  --bg: #FDF9F5;
+  --card: #FFFFFF;
+  --surface: #F5F0EA;
+  --divider: #ECE7E0;
+  --text: #2E2419;
+  --text-2: #8C8075;
+  --text-3: #B8AFA4;
+  --gold: #F59E0B;
+
+  --radius: 18px;
+  --radius-sm: 12px;
+  --shadow-sm: 0 2px 8px rgba(46, 36, 25, .05);
+  --shadow: 0 10px 30px rgba(46, 36, 25, .08);
+  --shadow-lg: 0 24px 60px rgba(229, 106, 30, .18);
+  --wrap: 1140px;
+}
+
+* { box-sizing: border-box; }
+
+/* 横向溢出防护：首屏的手机模型与浮动卡片是刻意超出容器画的
+   （.float-a { right: -6px }），窄屏上会撑出横向滚动条、右侧内容被切。
+   在 html 与 body 上同时兜一层 —— 只写 body 时某些浏览器仍以 html 为准。 */
+html { scroll-behavior: smooth; overflow-x: hidden; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+img { max-width: 100%; display: block; }
+a { color: inherit; text-decoration: none; }
+
+.wrap { width: 100%; max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
+.wrap-narrow { max-width: 800px; }
+
+/* ── 通用按钮 ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 22px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: #fff; font-weight: 600; font-size: 15px;
+  border-radius: 999px; border: 0; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(229, 106, 30, .3);
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+  white-space: nowrap;
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(229, 106, 30, .38); }
+.btn:active { transform: translateY(0); }
+.btn-sm { padding: 9px 18px; font-size: 14px; }
+.btn-lg { padding: 16px 32px; font-size: 17px; }
+.btn-invert {
+  background: #fff; color: var(--primary-dark);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .18);
+}
+.btn-invert:hover { box-shadow: 0 14px 38px rgba(0, 0, 0, .24); }
+
+/* ═══ 导航 ═══ */
+.nav {
+  position: fixed; inset: 0 0 auto 0; z-index: 50;
+  transition: background .25s ease, box-shadow .25s ease, backdrop-filter .25s;
+}
+.nav.scrolled {
+  background: rgba(253, 249, 245, .88);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  box-shadow: 0 1px 0 var(--divider), var(--shadow-sm);
+}
+.nav-inner {
+  height: 68px;
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; }
+/* 品牌标记：与 App 图标同一套几何（行进曲线 + 起点圆点）。
+   原来是 emoji 🏃 —— 各系统渲染出来的样子差别很大（有的甚至是黑白字形），
+   与 App 图标对不上。改成内联 SVG 后，任何平台上都是同一个形状。 */
+.brand-mark { width: 30px; height: 30px; display: block; flex: none; }
+.brand-mark svg { width: 100%; height: 100%; display: block; }
+.brand-text { font-size: 18px; letter-spacing: -.2px; }
+.brand-text em {
+  display: block; font-style: normal; font-size: 10.5px; font-weight: 600;
+  color: var(--text-3); letter-spacing: 1.4px; text-transform: uppercase;
+  margin-top: -2px;
+}
+.nav-links { display: flex; gap: 28px; font-size: 15px; color: var(--text-2); font-weight: 500; }
+.nav-links a:hover { color: var(--primary-dark); }
+
+/* ═══ 首屏 ═══ */
+.hero { position: relative; padding: 132px 0 0; overflow: hidden; }
+.hero-bg { position: absolute; inset: 0; pointer-events: none; }
+.blob {
+  position: absolute; border-radius: 50%; filter: blur(70px); opacity: .5;
+}
+.blob-1 {
+  width: 620px; height: 620px; top: -240px; right: -160px;
+  background: radial-gradient(circle, #FFD9BC, transparent 68%);
+}
+.blob-2 {
+  width: 520px; height: 520px; top: 120px; left: -220px;
+  background: radial-gradient(circle, #C8EFE7, transparent 68%);
+  opacity: .42;
+}
+.blob-3 {
+  width: 420px; height: 420px; bottom: -180px; left: 38%;
+  background: radial-gradient(circle, #FFE9D2, transparent 70%);
+  opacity: .5;
+}
+.grid-lines {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(229, 106, 30, .045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(229, 106, 30, .045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 78%);
+}
+
+.hero-inner {
+  position: relative;
+  /* 显式抬到装饰层之上：.hero-bg 里的跑道装饰是绝对定位的兄弟节点，
+     不写 z-index 时二者的绘制顺序取决于 DOM 顺序，容易出错。 */
+  z-index: 1;
+  display: grid; grid-template-columns: 1.06fr .94fr;
+  gap: 56px; align-items: center;
+}
+
+.pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px 6px 11px;
+  background: #fff; border: 1px solid var(--divider);
+  border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--text-2);
+  box-shadow: var(--shadow-sm);
+}
+.pill .dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #34C08B;
+  box-shadow: 0 0 0 4px rgba(52, 192, 139, .16);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(52, 192, 139, .16); }
+  50% { box-shadow: 0 0 0 7px rgba(52, 192, 139, .05); }
+}
+
+.hero h1 {
+  margin: 22px 0 0;
+  font-size: clamp(40px, 5.6vw, 66px);
+  line-height: 1.08; letter-spacing: -1.6px; font-weight: 800;
+}
+.hero h1 .hl {
+  position: relative; color: var(--primary-dark); white-space: nowrap;
+}
+.hero h1 .hl::after {
+  content: ''; position: absolute; left: -2px; right: -2px; bottom: .06em; height: .3em;
+  background: linear-gradient(90deg, rgba(255, 140, 66, .3), rgba(125, 211, 192, .26));
+  border-radius: 6px; z-index: -1;
+}
+.lede {
+  margin: 22px 0 0; font-size: 17.5px; line-height: 1.85; color: var(--text-2);
+  max-width: 30em;
+}
+
+.cta { margin-top: 34px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 22px; }
+.cta-meta { font-size: 13.5px; color: var(--text-3); display: flex; align-items: center; gap: 8px; }
+.cta-meta .sep { color: var(--divider); }
+.install-hint { margin-top: 16px; font-size: 13px; color: var(--text-2); }
+.install-hint .muted { color: var(--text-3); }
+
+/* ── 手机模型 ── */
+.hero-visual { position: relative; display: flex; justify-content: center; }
+.phone {
+  position: relative; width: 300px; aspect-ratio: 9 / 19;
+  background: #1b1b1f; border-radius: 40px; padding: 10px;
+  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(0, 0, 0, .05);
+}
+.phone-notch {
+  position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+  width: 96px; height: 22px; background: #1b1b1f; border-radius: 999px; z-index: 2;
+}
+.phone img {
+  width: 100%; height: 100%; object-fit: cover; object-position: top;
+  border-radius: 31px; background: var(--surface);
+}
+.phone.no-shot img { visibility: hidden; }
+.phone.no-shot::after {
+  content: '🏃'; position: absolute; inset: 0;
+  display: grid; place-items: center; font-size: 64px; border-radius: 31px;
+  background: linear-gradient(160deg, var(--primary-light), var(--surface));
+}
+.float-card {
+  position: absolute; display: flex; align-items: center; gap: 9px;
+  padding: 11px 16px; background: #fff; border-radius: 14px;
+  box-shadow: var(--shadow); font-size: 13.5px; font-weight: 600;
+  animation: floaty 5.5s ease-in-out infinite;
+}
+.float-card .fc-icon { font-size: 18px; }
+.float-a { top: 15%; right: -12px; animation-delay: -1.2s; }
+.float-b { bottom: 17%; left: -22px; animation-delay: -3.1s; }
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-11px); }
+}
+
+/* ── 数据条 ── */
+.stats {
+  position: relative; z-index: 1;
+  position: relative;
+  margin-top: 84px; padding: 26px 24px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+  border-top: 1px solid var(--divider);
+}
+.stat { text-align: center; }
+.stat b {
+  display: block; font-size: 30px; font-weight: 800; letter-spacing: -1px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.stat span { font-size: 13px; color: var(--text-3); }
+
+/* ═══ 区块 ═══ */
+.section { padding: 96px 0; }
+.section-alt { background: linear-gradient(180deg, transparent, #fff 14%, #fff 86%, transparent); }
+.sec-head { max-width: 640px; margin-bottom: 48px; }
+.eyebrow {
+  display: inline-block; font-size: 12.5px; font-weight: 800;
+  letter-spacing: 1.6px; text-transform: uppercase;
+  color: var(--primary-dark); margin-bottom: 12px;
+}
+.sec-head h2 {
+  margin: 0; font-size: clamp(27px, 3.4vw, 38px);
+  line-height: 1.24; letter-spacing: -.9px; font-weight: 800;
+}
+.sec-sub { margin: 14px 0 0; color: var(--text-2); font-size: 16px; }
+
+/* ── 功能卡 ── */
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.card {
+  background: var(--card); border: 1px solid var(--divider);
+  border-radius: var(--radius); padding: 28px 26px 30px;
+  box-shadow: var(--shadow-sm);
+  transition: transform .22s ease, box-shadow .22s ease, border-color .22s;
+}
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow); border-color: var(--primary-light);
+}
+.ic {
+  width: 46px; height: 46px; border-radius: 13px;
+  display: grid; place-items: center; margin-bottom: 18px;
+}
+.ic svg { width: 24px; height: 24px; }
+.ic-run { background: #FFF0E4; color: var(--primary-dark); }
+.ic-trophy { background: #FFF6E4; color: var(--gold); }
+.ic-chat { background: #E7F8F4; color: #2FA48C; }
+.ic-goal { background: #FFEDE9; color: #E2564A; }
+.ic-map { background: #EAF2FE; color: #3D7DD8; }
+.ic-notify { background: #F1EDFF; color: #6D5BD0; }
+.card h3 { margin: 0 0 10px; font-size: 19px; font-weight: 700; letter-spacing: -.3px; }
+.card p { margin: 0; color: var(--text-2); font-size: 14.5px; line-height: 1.8; }
+
+/* ── 截图 ── */
+.shots {
+  display: grid; grid-template-columns: .85fr 1.3fr .85fr;
+  gap: 22px; align-items: end;
+}
+.shot { margin: 0; }
+.shot img {
+  width: 100%; border-radius: var(--radius);
+  border: 1px solid var(--divider); background: var(--surface);
+  box-shadow: var(--shadow);
+  transition: transform .25s ease, box-shadow .25s ease;
+}
+.shot:hover img { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+.shot-wide img { aspect-ratio: 4 / 3; object-fit: cover; object-position: top; }
+.shot:not(.shot-wide) img { aspect-ratio: 9 / 16; object-fit: cover; object-position: top; }
+.shot figcaption {
+  margin-top: 12px; text-align: center;
+  font-size: 13px; color: var(--text-3); font-weight: 500;
+}
+
+/* ── FAQ ── */
+.qa {
+  background: var(--card); border: 1px solid var(--divider);
+  border-radius: var(--radius-sm); padding: 4px 22px; margin-bottom: 12px;
+  box-shadow: var(--shadow-sm); transition: border-color .2s;
+}
+.qa[open] { border-color: var(--primary-light); }
+.qa summary {
+  cursor: pointer; padding: 17px 0; font-weight: 650; font-size: 16px;
+  list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.qa summary::-webkit-details-marker { display: none; }
+.qa summary::after {
+  content: ''; flex: 0 0 auto; width: 9px; height: 9px;
+  border-right: 2px solid var(--text-3); border-bottom: 2px solid var(--text-3);
+  transform: rotate(45deg); transition: transform .22s ease; margin-top: -4px;
+}
+.qa[open] summary::after { transform: rotate(-135deg); margin-top: 2px; }
+.qa p {
+  margin: 0 0 20px; color: var(--text-2); font-size: 14.8px; line-height: 1.85;
+  padding-right: 24px;
+}
+
+/* ── 结尾 ── */
+.final {
+  padding: 92px 0 96px; text-align: center;
+  background:
+    radial-gradient(ellipse 70% 120% at 50% 0%, rgba(255, 217, 188, .55), transparent 70%),
+    linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: #fff;
+}
+.final-inner h2 {
+  margin: 0; font-size: clamp(30px, 4vw, 44px);
+  font-weight: 800; letter-spacing: -1.1px;
+}
+.final-inner p { margin: 16px 0 34px; font-size: 17px; opacity: .93; }
+.final-meta { margin: 20px 0 0 !important; font-size: 13.5px !important; opacity: .8 !important; }
+
+/* ── 页脚 ── */
+.foot { background: #fff; border-top: 1px solid var(--divider); padding: 40px 0 34px; }
+.foot-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 18px 28px; }
+.foot-brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 15px; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 22px; font-size: 14px; color: var(--text-2); margin-left: auto; }
+.foot-links a:hover { color: var(--primary-dark); }
+.foot-note { flex-basis: 100%; margin: 6px 0 0; font-size: 13px; color: var(--text-3); }
+
+/* ── 滚动渐入 ── */
+.reveal { opacity: 0; transform: translateY(18px); }
+.reveal.in {
+  opacity: 1; transform: none;
+  transition: opacity .6s cubic-bezier(.16,1,.3,1), transform .6s cubic-bezier(.16,1,.3,1);
+}
+
+/* ═══ 首屏的跑道装饰 ═══
+   呼应 App 登录页那条「会跑的跑道」：波形 + 一个上下轻浮的圆点。
+
+   ⚠️ 这里**不写 z-index**。它位于 .hero-bg（absolute，无 z-index）内部，
+   两者都是绝对定位；只给装饰一个 z-index: 0 会让它建立层叠上下文、
+   从而盖在同样没有 z-index 的 .hero-inner 之上。
+   改为给内容层显式 z-index: 1（见下方 .hero-inner / .stats）。 */
+.track-deco {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  width: 100%; height: 240px;
+  pointer-events: none; opacity: .9;
+}
+.track-dot { will-change: transform; }
+
+/* ═══ 更新日志 ═══ */
+.clog { list-style: none; margin: 0; padding: 0; position: relative; }
+/* 左侧竖线：把各版本串成一条时间轴，比并列卡片更能表达「持续在改」 */
+.clog::before {
+  content: ""; position: absolute; left: 7px; top: 12px; bottom: 12px;
+  width: 2px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--primary), var(--primary-light));
+}
+/* ⚠️ 淡入效果是「渐进增强」，不是内容可见的前提。
+   最初这里直接写 opacity: 0，靠 JS 加 .in 才显示 ——
+   结果一旦脚本没跑（被拦截、报错、或观察器没触发），
+   **整段更新日志永久不可见**，而且没有任何报错。
+   现在只有在 JS 已就绪（<html class="js">）时才隐藏，
+   JS 不可用时内容照常显示。 */
+.js .clog-item {
+  opacity: 0; transform: translateY(12px);
+  transition: opacity .5s ease, transform .5s ease;
+}
+.clog-item {
+  position: relative; padding-left: 34px; padding-bottom: 30px;
+}
+.clog-item:last-child { padding-bottom: 0; }
+.clog-item.in { opacity: 1; transform: none; }
+/* 时间轴上的节点 */
+.clog-item::before {
+  content: ""; position: absolute; left: 0; top: 5px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--card); border: 3px solid var(--primary);
+  box-shadow: 0 0 0 4px rgba(255, 140, 66, .1);
+}
+.clog-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.clog-ver {
+  font-size: 16px; font-weight: 800; color: var(--primary-dark);
+  font-variant-numeric: tabular-nums;
+}
+.clog-date {
+  font-size: 12px; font-weight: 600; color: var(--text-3); letter-spacing: .5px;
+}
+.clog-item ul { list-style: none; margin: 0; padding: 0; }
+.clog-item li {
+  position: relative; padding-left: 16px; margin-bottom: 6px;
+  font-size: 14.5px; line-height: 1.75; color: var(--text-2);
+}
+.clog-item li::before {
+  content: ""; position: absolute; left: 0; top: 11px;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--primary-light);
+}
+
+/* ═══ 横向溢出防护 ═══
+   首屏的手机模型与「连续打卡 7 天」浮动卡片是刻意超出容器画的
+   （.float-a { right: -6px }），窄屏上会把页面撑出横向滚动条，
+   表现为右侧内容被切掉。
+
+   在 html/body 上兜一层 overflow-x: hidden 是标准做法：
+   溢出内容被裁掉而不是把整页撑宽。
+   ⚠️ 必须同时写在 html 和 body 上 —— 只写 body 时，
+   某些浏览器仍会以 html 的溢出为准而出现横向滚动。 */
+/* ── 响应式 ── */
+@media (max-width: 980px) {
+  .hero-inner { grid-template-columns: 1fr; gap: 48px; }
+  .hero-visual { order: -1; }
+  .phone { width: 250px; }
+  .lede { max-width: none; }
+  .cards { grid-template-columns: repeat(2, 1fr); }
+  .shots { grid-template-columns: 1fr 1fr; }
+  .shot-wide { grid-column: 1 / -1; }
+  .stats { grid-template-columns: repeat(2, 1fr); gap: 22px; }
+}
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .hero { padding-top: 104px; }
+  .section { padding: 70px 0; }
+  .cards { grid-template-columns: 1fr; }
+  .shots { grid-template-columns: 1fr; }
+  /* 浮动卡片收进容器：原来 right: -6px / left: -6px 在窄屏上会超出视口 */
+  .float-a { right: 0; }
+  .float-b { left: 0; }
+  .phone { width: 210px; }
+  .cta-meta { font-size: 12.5px; }
+  .foot-links { margin-left: 0; }
+  /* 更新日志：窄屏上减小左侧缩进，给正文留出宽度 */
+  .clog-item { padding-left: 26px; }
+  .clog-item li { font-size: 14px; }
+}
+@media (max-width: 380px) {
+  .phone { width: 186px; }
+  .stats { grid-template-columns: 1fr 1fr; gap: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+  .reveal { opacity: 1; transform: none; }
+  html { scroll-behavior: auto; }
+}

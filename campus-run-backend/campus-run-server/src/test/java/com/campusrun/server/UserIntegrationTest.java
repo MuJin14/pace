@@ -22,7 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 class UserIntegrationTest {
 
-    private static final Pattern UNIQUE_ID_PATTERN = Pattern.compile("^CR-\\d{8}$");
+    /** 专属 ID：8 位纯数字（左补零），不再带 CR- 前缀。 */
+    private static final Pattern UNIQUE_ID_PATTERN = Pattern.compile("^\\d{8}$");
     private static final String PHONE = "13800138000";
     private static final String PASSWORD = "secret123";
 
@@ -51,7 +52,7 @@ class UserIntegrationTest {
         assertNotNull(user);
         assertEquals(PHONE, user.getPhone());
         assertEquals("小明", user.getNickname());
-        assertTrue(UNIQUE_ID_PATTERN.matcher(user.getUniqueId()).matches(), "专属 ID 应为 CR-XXXXXXXX 格式");
+        assertTrue(UNIQUE_ID_PATTERN.matcher(user.getUniqueId()).matches(), "专属 ID 应为 8 位纯数字格式");
         assertNotEquals(PASSWORD, user.getPasswordHash(), "密码应为密文，非明文");
         assertTrue(user.getPasswordHash().startsWith("$2"), "密码应为 BCrypt 密文（$2 开头）");
 

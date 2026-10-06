@@ -1,0 +1,159 @@
+# 一键部署：MySQL + 后端应用（生产用）。
+#
+# 用法（在 campus-run-backend/ 目录下）：
+#   1. cp .env.example .env   然后填写里面的值（尤其是 JWT_SECRET）
+#   2. docker compose -f docker-compose.deploy.yml up -d --build
+#   3. docker compose -f docker-compose.deploy.yml logs -f app
+#
+# 说明：
+# - 原来的 docker-compose.yml 只起 MySQL（留给本地开发用），这个文件才是部署用的完整栈。
+# - MySQL 不对外暴露端口：只给 app 容器内网访问，避免公网上被扫 3306。
+# - schema.sql 通过 docker-entrypoint-initdb.d 自动初始化（仅首次创建数据卷时执行）。
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: campus-run-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?必须在 .env 里设置 DB_PASSWORD}
+      MYSQL_DATABASE: campus_run
+      # ⚠️ 用官方 MYSQL_* 环境变量设字符集，**不要**用 command 里的
+      # `--character-set-client` / `--character-set-connection` / `--character-set-results`。
+      #
+      # 那三个选项**只有 mysql 客户端认**，`mysqld` 服务端会报
+      #   [ERROR] [MY-000067] unknown variable 'character-set-client=utf8mb4'
+      # 然后**立刻 abort** → 容器无限重启。
+      #
+      # 这个错误配置潜伏了很久，因为容器一直没被重建过；
+      # 一旦重启 MySQL 或让 compose 判断「配置变了」，服务就直接起不来。
+      # 我因此把线上搞挂过两次。
+      #
+      # entrypoint 会把下面这几个变量写成配置文件，mysqld 必定接受，
+      # utf8mb4 依然生效（不设的话首次初始化 schema.sql 时中文会被当成
+      # latin1 双重编码，就是档案里记载的「勋章墙乱码」）。
+      MYSQL_INITDB_SKIP_TZINFO: "1"
+      LANG: C.UTF-8
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次启动自动建表（12 张表）。已存在同数据卷时不会再执行。
+      - ./docs/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      # 必须先等 MySQL 真正可用，否则 app 启动时连接会失败
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${DB_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [campus-net]
+
+  app:
+    build:
+      # 构建上下文是 backend 根目录：Dockerfile 需要 pom.xml + 两个子模块
+      context: .
+      dockerfile: Dockerfile
+    container_name: campus-run-app
+    restart: unless-stopped
+    # 2C2G 服务器：限制内存，避免应用把 MySQL 挤到 OOM
+    mem_limit: 900m
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/campus_run?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD}
+      # 生产必须注入随机串（>=32 字节）。生成：openssl rand -base64 48
+      JWT_SECRET: ${JWT_SECRET:?必须在 .env 里设置 JWT_SECRET}
+      # 头像等上传文件的对外地址前缀：必须是公网可访问的地址，
+      # 否则客户端拿到的头像 URL 打不开。填 http://<服务器公网IP>:8080
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?必须在 .env 里设置 PUBLIC_BASE_URL}
+      # 上传文件持久化（不挂卷的话容器重建后头像全丢）
+      UPLOAD_DIR: /app/uploads
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:*}
+      # ── App 自更新 ────────────────────────────────────────────
+      # 用挂载目录投递 APK，而不是把 52MB 的包打进镜像：
+      # 发新版本只需上传一个文件 + 改环境变量，不用重建镜像。
+      APP_VERSION_APK_PATH: /app/apk/campus-run.apk
+      # 留空 = 不提示更新（接口仍可用）。发布新版本时填新版本号。
+      APP_VERSION_LATEST: ${APP_VERSION_LATEST:-}
+      APP_VERSION_MIN_SUPPORTED: ${APP_VERSION_MIN_SUPPORTED:-}
+      APP_VERSION_CHANGELOG: ${APP_VERSION_CHANGELOG:-}
+      TZ: Asia/Shanghai
+    volumes:
+      - upload-data:/app/uploads
+      # APK 投递目录。ro：容器只读它，没有写需求。
+      # ⚠️ 文件权限要注意：容器以 app(uid 999) 运行，
+      # 若宿主机上的 APK 是 600，容器读不到 —— 表现为「下载 404」。
+      # 所以上传脚本会 chmod 644。
+      - ./apk:/app/apk:ro
+    ports:
+      # 只暴露应用端口；MySQL 不暴露
+      - "${APP_PORT:-8080}:8080"
+    networks: [campus-net]
+
+  # HTTPS 网关：App 访问 https://api.hibiscus.wiki:8443，
+  # 由 Caddy 终结 TLS 并反代到 app:8080。
+  #
+  # 两个关键决策（都是被真实的网络环境逼出来的）：
+  #
+  # 1) **用非标准端口 8443，不用 443**
+  #    服务器在腾讯云境内，未备案域名的 80/443 会被拦截 —— 实测返回
+  #    302 → https://dnspod.qcloud.com/static/webblock.html?d=<域名>。
+  #    非标准端口不受影响（实测 8080 上带任意 Host 都正常返回）。
+  #
+  # 2) **用 DNS-01 验证，不用 HTTP-01**
+  #    80/443 既被 webblock 干扰（http-01 拿不到验证请求），
+  #    又因为走 Cloudflare 代理而无法直连（tls-alpn-01 无法协商）。
+  #    DNS-01 只需通过 Cloudflare API 写一条 TXT 记录，
+  #    **不依赖任何入站端口**，因此稳定可靠。
+  #    代价：需要自定义镜像（Dockerfile.caddy-dns 内置 cloudflare 插件）。
+  caddy:
+    # ⚠️ 用上游 caddy:2，**不要** build 自定义镜像。
+    #
+    # 早期方案是用 DNS-01 申请 Let's Encrypt 证书，需要内置 cloudflare 插件
+    # 的自定义镜像（Dockerfile.caddy-dns）。但那条路在这台服务器上走不通：
+    # 80/443 被境内策略拦截，ACME 的 http-01 / tls-alpn-01 拿不到验证请求。
+    #
+    # 现在改用 Cloudflare **源站证书**（挂载在 /certs，2041 年到期、
+    # 不需要续期、不依赖 API Token），因此**不需要任何插件**，
+    # 上游镜像就够。留着 build 只会让 compose 去拉一个不存在的镜像。
+    image: caddy:2
+    container_name: campus-run-caddy
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      # 8443：App 实际使用的端口（见上面的说明）
+      - "8443:8443"
+    # 刻意**不设** environment：
+    # 之前这里有 `CF_API_TOKEN: ${CF_API_TOKEN:?...}`，而 .env 里并没有这个变量。
+    # `${VAR:?msg}` 是强制必填，compose 会直接报错退出 ——
+    # 结果是**任何容器都重建不了**，改了挂载也白改（我为此排查了很久，
+    # 症状是「配置明明改了却一直不生效」）。
+    # 现在证书方案不需要这个 Token，整个删掉。
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Cloudflare 源站证书。挂进来给站点用 —— 浏览器看到的证书由
+      # Cloudflare 边缘提供，源站这张只在 Cloudflare → 源站 之间使用，
+      # 所以它到 2041 年才过期，**没有续期问题**。
+      - ./certs:/certs:ro
+      # 官网静态站点。挂载而不是打进镜像：改页面不用重建镜像。
+      - ./site:/srv/site:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+    networks: [campus-net]
+
+volumes:
+  mysql-data:
+  upload-data:
+  caddy-data:
+  caddy-config:
+  caddy-logs:
+
+networks:
+  campus-net:

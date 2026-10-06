@@ -208,16 +208,45 @@ class FriendServiceImplTest {
     }
 
     @Test
-    void search_excludesSelfAndFriends() {
+    void search_includesSelfAndFriends_withRelationFlags() {
         Long a = registerUser("13910000122", "跑者甲").getUserId();
         Long b = registerUser("13910000123", "跑者乙").getUserId();
         Long c = registerUser("13910000124", "跑者丙").getUserId();
 
         makeFriends(a, b);
 
+        // 产品要求（微信式）：搜到自己和已有好友都要能搜到，
+        // 由 relation 告诉客户端该显示什么操作，而不是把它们隐藏掉。
         PageResponse<UserBriefResponse> result = friendService.search(a, "跑者", 1, 20);
-        assertEquals(1, result.getTotal());
-        assertEquals(c, result.getList().get(0).getUserId());
+
+        assertEquals(3, result.getTotal(), "自己 + 已是好友 + 无关系者都应出现");
+
+        assertEquals("self", relationOf(result, a), "自己应为 self");
+        assertEquals("friend", relationOf(result, b), "已是好友应为 friend");
+        assertEquals("none", relationOf(result, c), "无关系应为 none");
+    }
+
+    @Test
+    void search_pendingRelationsAreDistinguished() {
+        Long a = registerUser("13910000130", "申请方甲").getUserId();
+        Long b = registerUser("13910000131", "被申请乙").getUserId();
+
+        friendService.sendRequest(a, b);
+
+        // a 看 b：我发出的待处理
+        assertEquals("pending_outgoing",
+                relationOf(friendService.search(a, "被申请乙", 1, 20), b));
+        // b 看 a：对方发给我的待处理 —— 客户端应显示「通过验证」而不是「添加」
+        assertEquals("pending_incoming",
+                relationOf(friendService.search(b, "申请方甲", 1, 20), a));
+    }
+
+    private static String relationOf(PageResponse<UserBriefResponse> result, Long userId) {
+        return result.getList().stream()
+                .filter(u -> u.getUserId().equals(userId))
+                .findFirst()
+                .map(UserBriefResponse::getRelation)
+                .orElse(null);
     }
 
     @Test

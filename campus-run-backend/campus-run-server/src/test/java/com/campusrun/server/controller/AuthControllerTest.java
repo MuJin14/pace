@@ -63,7 +63,7 @@ class AuthControllerTest {
         response.setUniqueId("CR-00001234");
         response.setNickname("小明");
         response.setPhone("13800138000");
-        when(authService.register(any())).thenReturn(response);
+        when(authService.register(any(), any())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -76,7 +76,7 @@ class AuthControllerTest {
 
     @Test
     void register_duplicatePhone_returnsPhoneExists() throws Exception {
-        when(authService.register(any())).thenThrow(new BusinessException(ErrorCode.PHONE_EXISTS));
+        when(authService.register(any(), any())).thenThrow(new BusinessException(ErrorCode.PHONE_EXISTS));
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -100,7 +100,7 @@ class AuthControllerTest {
         response.setToken("token-1");
         response.setUserId(1L);
         response.setUniqueId("CR-00001234");
-        when(authService.login(any())).thenReturn(response);
+        when(authService.login(any(), any())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -112,7 +112,7 @@ class AuthControllerTest {
 
     @Test
     void login_wrongPassword_returnsPasswordError() throws Exception {
-        when(authService.login(any())).thenThrow(new BusinessException(ErrorCode.PASSWORD_ERROR));
+        when(authService.login(any(), any())).thenThrow(new BusinessException(ErrorCode.PASSWORD_ERROR));
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -123,7 +123,7 @@ class AuthControllerTest {
 
     @Test
     void login_userNotFound_returnsUserNotFound() throws Exception {
-        when(authService.login(any())).thenThrow(new BusinessException(ErrorCode.USER_NOT_FOUND));
+        when(authService.login(any(), any())).thenThrow(new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

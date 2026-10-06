@@ -32,7 +32,7 @@ class PrimaryButton extends StatelessWidget {
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
             ),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadius.md),
             boxShadow: [
               BoxShadow(
                 color: AppColors.primary.withValues(alpha: 0.28),
@@ -56,13 +56,13 @@ class PrimaryButton extends StatelessWidget {
                     children: [
                       if (icon != null) ...[
                         Icon(icon, color: Colors.white, size: 20),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: AppSpacing.sm),
                       ],
                       Text(
                         label,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 16,
+                          fontSize: AppFontSize.title,
                           fontWeight: FontWeight.w600,
                         ),
                       ),

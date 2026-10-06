@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标（Android 8+）的**背景层**。
+
+  为什么用 shape 而不是 <color>：
+
+  最初这里是一行 `<color name="ic_launcher_background">#FF8C42</color>`，
+  于是出现了一个不易察觉但不一致的问题 ——
+  同一台手机上，**启动器**与**应用信息页**显示的图标背景不同：
+
+    · 启动器（API 26+）用 mipmap-anydpi-v26/ic_launcher.xml
+      -> 背景走这里的资源 -> 当时是**纯色**；
+    · 应用信息页 / 旧版启动器用 mipmap-*/ic_launcher.png
+      -> 是生成脚本画的**对角渐变**。
+
+  两者内容相同（都是那条行进轨迹），但底色一个纯色、一个渐变，
+  放在一起对比就能看出「两个图标不一样」。
+
+  现在背景层也用与 PNG 完全相同的对角线渐变
+  （135° = 左上 -> 右下，#FF8C42 -> #F0653A，与 tools/make_app_icon.py 一致），
+  两套图标在任何界面下都是同一个外观。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="135"
+        android:startColor="#FFFF8C42"
+        android:endColor="#FFF0653A"
+        android:type="linear" />
+</shape>

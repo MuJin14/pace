@@ -8,6 +8,7 @@ import com.campusrun.server.dto.response.MyRankResponse;
 import com.campusrun.server.enums.LeaderboardScope;
 import com.campusrun.server.mapper.LeaderboardMapper;
 import com.campusrun.server.service.LeaderboardService;
+import com.campusrun.server.service.UserRelationResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,9 +30,19 @@ public class LeaderboardServiceImpl implements LeaderboardService {
     private static final int[] TYPES = {1, 2};
 
     private final LeaderboardMapper leaderboardMapper;
+    private final UserRelationResolver relationResolver;
 
-    public LeaderboardServiceImpl(LeaderboardMapper leaderboardMapper) {
+    /** Spring 用这个构造器（显式标注，避免与下方兼容构造器歧义）。 */
+    @org.springframework.beans.factory.annotation.Autowired
+    public LeaderboardServiceImpl(LeaderboardMapper leaderboardMapper,
+                                  UserRelationResolver relationResolver) {
         this.leaderboardMapper = leaderboardMapper;
+        this.relationResolver = relationResolver;
+    }
+
+    /** 兼容构造器（既有单测用，不涉及 relation）。 */
+    public LeaderboardServiceImpl(LeaderboardMapper leaderboardMapper) {
+        this(leaderboardMapper, null);
     }
 
     @Override
@@ -47,7 +58,8 @@ public class LeaderboardServiceImpl implements LeaderboardService {
     }
 
     @Override
-    public PageResponse<LeaderboardEntryResponse> getBoard(String scope, String period, Integer type, long page, long size) {
+    public PageResponse<LeaderboardEntryResponse> getBoard(String scope, String period, Integer type,
+                                                          long page, long size, Long currentUserId) {
         LeaderboardScope scopeEnum = validateScope(scope);
         int typeValue = validateType(type);
         String resolvedPeriod = resolvePeriod(scopeEnum, period);
@@ -61,6 +73,39 @@ public class LeaderboardServiceImpl implements LeaderboardService {
                 scopeEnum.getCode(), resolvedPeriod, typeValue, offset, safeSize);
         for (int i = 0; i < rows.size(); i++) {
             rows.get(i).setRank(offset + i + 1);
+        }
+
+        // 补社交关系：让用户能直接在榜单上加好友，且按钮状态正确。
+        if (relationResolver != null && currentUserId != null) {
+            for (LeaderboardEntryResponse row : rows) {
+                row.setRelation(
+                        relationResolver.resolve(currentUserId, row.getUserId()).getCode());
+            }
+        }
+
+        // 补「与前后名的差距」。只在本页内计算：跨页时需要额外查询，
+        // 而差距的价值主要在相邻名次（第 1 名和第 20 名的差额意义不大）。
+        for (int i = 0; i < rows.size(); i++) {
+            Integer mine = rows.get(i).getDistanceMeters();
+            if (mine == null) {
+                continue;
+            }
+            if (i > 0) {
+                Integer ahead = rows.get(i - 1).getDistanceMeters();
+                if (ahead != null) {
+                    rows.get(i).setGapToAheadMeters(Math.max(0, ahead - mine));
+                }
+            } else if (offset > 0) {
+                // 本页第一条且不是全局第一：它前面的人不在本次结果里，
+                // 留空而不是错误地当成「第 1 名」。
+                rows.get(i).setGapToAheadMeters(null);
+            }
+            if (i + 1 < rows.size()) {
+                Integer behind = rows.get(i + 1).getDistanceMeters();
+                if (behind != null) {
+                    rows.get(i).setGapToBehindMeters(Math.max(0, mine - behind));
+                }
+            }
         }
         return new PageResponse<>(total, safePage, safeSize, rows);
     }

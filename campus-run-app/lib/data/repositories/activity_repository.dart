@@ -6,6 +6,7 @@ import '../../core/network/dio_client.dart';
 import '../models/activity_detail.dart';
 import '../models/activity_summary.dart';
 import '../models/page_response.dart';
+import '../models/track_point.dart';
 
 final activityRepositoryProvider = Provider<ActivityRepository>((ref) {
   return ActivityRepository(ref.read(dioProvider));
@@ -40,6 +41,29 @@ class ActivityRepository {
     try {
       final resp = await _dio.get('/api/v1/activity/$id');
       return ActivityDetail.fromJson(_unwrap(resp));
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
+
+  /// 创建运动记录（轨迹由后端重算距离/时长/配速），返回 activityId。
+  Future<int> create({
+    required int type,
+    required int startTime,
+    required int endTime,
+    required List<TrackPoint> track,
+    double? calories,
+  }) async {
+    try {
+      final resp = await _dio.post('/api/v1/activity', data: {
+        'type': type,
+        'startTime': startTime,
+        'endTime': endTime,
+        if (calories != null) 'calories': calories,
+        'track': track.map((p) => p.toJson()).toList(),
+      });
+      final data = _unwrap(resp);
+      return (data['activityId'] as num).toInt();
     } on DioException catch (e) {
       throw ApiException.fromDio(e);
     }

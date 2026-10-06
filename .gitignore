@@ -1,2 +1,137 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# 校园跑 Campus Run · 仓库根 .gitignore
+# 只忽略构建产物、IDE 与本地环境文件；设计资产必须可提交，见文件末尾一节。
+# 子目录自带的 .gitignore（campus-run-app/、campus-run-backend/、各平台目录）仍然生效。
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 日志 / 本地环境 / 密钥 ───────────────────────────────────────────────────
 *.log
 run.log
+.env
+.env.*
+application-local.yml
+application-local.yaml
+*.local.yml
+
+# ── 操作系统 ─────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ── IDE / 编辑器 ─────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+*.swo
+.history
+.claude/settings.local.json
+
+# ── Java / Maven ─────────────────────────────────────────────────────────────
+target/
+*.class
+*.jar
+*.war
+!.mvn/wrapper/maven-wrapper.jar
+
+# ── Flutter / Dart ───────────────────────────────────────────────────────────
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+**/doc/api/
+**/generated_plugin_registrant.*
+**/generated_plugins.cmake
+**/GeneratedPluginRegistrant.*
+**/GeneratedPluginRegistrant.java
+app.*.symbols
+app.*.map.json
+**/Flutter/ephemeral/
+**/flutter/ephemeral/
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+
+# ── Android / Gradle ─────────────────────────────────────────────────────────
+.gradle/
+**/local.properties
+**/key.properties
+**/*.jks
+**/*.keystore
+**/gradle-wrapper.jar
+**/captures/
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# ── iOS / macOS / CocoaPods ──────────────────────────────────────────────────
+**/Pods/
+**/.symlinks/
+**/xcuserdata/
+*.xcuserstate
+**/Flutter/ephemeral/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 设计资产（禁止忽略 —— 必须保持可提交 / 可被 git status 看到）
+#   campus-run-app/design/*.png  首页规格板 home_spec.png、数据态 home_loaded.png、空态 home_empty.png
+#   前端页面示例/*.png            规格说明板.png、页面 1.png、首页 · 数据态.png、首页 · 空态.png
+#   flutter-design/               设计稿导出的参考工程（lib/、assets/ 字体与 SVG、web/、android/ 源码）
+# 说明：flutter-design/flutter_ui/ 内部由上面规则忽略的 build/、.dart_tool/、*.iml、
+#      local.properties 属于构建产物与机器相关文件，故意不提交；其源码与素材保持可提交。
+# 下面显式兜底，后续新增宽泛规则时不要覆盖这几条。
+# ─────────────────────────────────────────────────────────────────────────────
+!campus-run-app/design/
+!campus-run-app/design/**
+!前端页面示例/
+!前端页面示例/**
+!flutter-design/
+!flutter-design/flutter_ui/
+!flutter-design/flutter_ui/lib/**
+!flutter-design/flutter_ui/assets/**
+!flutter-design/flutter_ui/pubspec.yaml
+!flutter-design/flutter_ui/pubspec.lock
+
+# 兜底：上面的 ! 规则可能把设计工程里的系统/构建垃圾一并放行，这里重新忽略。
+# 这些规则必须放在所有 ! 规则之后才能生效。
+**/.DS_Store
+**/._*
+**/Thumbs.db
+**/desktop.ini
+**/.dart_tool/
+**/build/
+**/*.iml
+**/local.properties
+
+# 本地上传目录（头像等），不入库
+uploads/
+campus-run-backend/uploads/
+
+# Firebase 服务账号私钥（后端发推送用，含私钥，绝不能提交）
+firebase-service-account*.json
+
+# 注意：google-services.json / GoogleService-Info.plist **不**排除。
+# 它们会被打包进 App、本来就不算机密；排除掉反而会导致别人克隆后无法构建。
+# ── 本次新增：临时与备份文件 ──────────────────────────────────
+# *.bak-<时间戳> 是部署脚本在服务器上留的备份，本不该出现在客户端；
+# 但本地调试时也生成过，统一忽略，避免误提交一堆历史快照。
+*.bak-*
+/deploy-staging/
+/site-staging/
+# ── 安装包不进版本库 ──────────────────────────────────────────
+# 54MB 的二进制每次发版都让仓库膨胀，而且 GitHub 对单文件有 50MB 建议上限。
+# 分发的正确位置是 GitHub Releases（Release 资产不受仓库体积影响）。
+# 官网目录下这份只是为了部署脚本上传，本地可由构建产物复制得到。
+**/site/downloads/*.apk
+# ── CI 工作流暂不推送 ─────────────────────────────────────────
+# 推送 .github/workflows/ 需要 token 带 workflow 权限，
+# 而当前 fine-grained token 只授了 Contents。文件本身没问题，
+# 补上权限后删掉这条规则即可推送。
+.github/

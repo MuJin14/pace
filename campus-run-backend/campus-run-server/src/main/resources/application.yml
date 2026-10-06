@@ -6,11 +6,18 @@ spring:
     name: campus-run-server
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/campus_run?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
-    username: root
-    password: root
+    # 全部支持环境变量覆盖；冒号后的值是本地开发默认值，禁止用于生产。
+    url: ${DB_URL:jdbc:mysql://localhost:3306/campus_run?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:root}
   jackson:
     time-zone: Asia/Shanghai
+  servlet:
+    multipart:
+      # 头像上限 2MB：与 FileStorageService 的二次校验保持一致。
+      # 不设这个上限时 Spring 默认 1MB，用户传 1.5MB 的照片会得到 500 而不是可读的提示。
+      max-file-size: 2MB
+      max-request-size: 3MB
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -22,13 +29,59 @@ mybatis-plus:
       id-type: auto
 
 jwt:
-  secret: campus-run-jwt-secret-key-please-change-this-in-production-0123456789
-  expiration: 86400
+  # 生产必须通过环境变量 JWT_SECRET 注入（长度 >= 32 字节），不要沿用此默认值。
+  secret: ${JWT_SECRET:campus-run-dev-only-jwt-secret-key-change-me-in-production-0123456789}
+  # access token 有效期（秒）：2 小时。短命 + refresh 续期，替代原先的 24 小时单令牌。
+  expiration: ${JWT_EXPIRATION:7200}
+  # refresh token 有效期（秒）：30 天。
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:2592000}
 
 app:
   cors:
-    allowed-origins: "http://localhost:*,http://127.0.0.1:*"
+    # 生产必须通过 CORS_ALLOWED_ORIGINS 收紧到真实域名；默认只放行本机便于联调。
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}
+  # 本地上传目录（头像）。生产建议挂独立数据盘或用对象存储。
+  upload-dir: ${UPLOAD_DIR:uploads}
+  # 生成的头像 URL 前缀：必须是浏览器能访问到的公网/局域网地址。
+  # 若放在 Nginx 后面，这里要填对外域名，否则返回的 URL 客户端打不开。
+  public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
+  # ---- 离线推送（FCM HTTP v1）----
+  # enabled=false 时用 LoggingPushSender：只把通知内容写日志，便于无凭证开发与测试。
+  # 生产置 true 并配置 credentials（Firebase 服务账号 JSON）。
+  push:
+    enabled: ${PUSH_ENABLED:false}
+    # 服务账号 JSON 路径，支持 classpath: 与容器内绝对路径。
+    # 该文件含私钥，必须在 .gitignore 中排除，绝不能提交。
+    credentials: ${PUSH_CREDENTIALS:}
 
+# ---- App 自更新 ----
+# Android 8.0 起禁止静默自安装，所以这里只负责「提供正确的包」，
+# 下载后由系统安装器让用户确认（微信/淘宝同一流程）。
+# latest 留空 = 不提示更新（接口仍可用，客户端拿到空值就跳过）。
+# ── 上传与媒体保留 ────────────────────────────────────────────
+# 上传是外部唯一能往服务器写数据的入口，写满磁盘会让 MySQL 一起挂掉
+# （不是「图片坏了」，而是整个 App 下线），所以有两道防护。
+app-storage:
+  # 剩余空间低于这个值就拒绝新上传。磁盘本来要留 20% 给系统，
+  # 这里保守设 512MB：现在 uploads 才 1.2MB，正常永远碰不到。
+  min-free-mb: ${STORAGE_MIN_FREE_MB:512}
+
+app-media:
+  # 聊天图片保留天数。到期后**删文件但保留消息**
+  # （前端显示「图片已过期」），避免聊天记录凭空少几条。
+  # 0 或负数 = 不清理。默认 90 天：7 天太激进，会让用户翻上周的
+  # 聊天时图片全变占位符，而体积上完全没必要（实测 uploads 才 1.2MB）。
+  retention-days: ${MEDIA_RETENTION_DAYS:90}
+
+app-version:
+  # 只需要 APK 的位置。版本号 / 强制更新门槛 / 更新说明都从
+  # **同目录的 version.json** 读取（每次请求实时读）。
+  #
+  # 为什么不放在这里：本文件的这些值来自 compose 的 environment，
+  # 改它们会让 compose **重建容器**（8 分钟重新编译）。
+  # 而发新版本只是换一个 APK 文件，应该秒级生效。
+  apk-path: ${APP_VERSION_APK_PATH:}
 logging:
   level:
     com.campusrun: debug
+

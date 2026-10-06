@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import 'api_exception.dart';
 
@@ -12,6 +13,9 @@ Map<String, dynamic> unwrapMap(Response resp) {
   }
   final code = data['code'];
   if (code != 0) {
+    // 业务错误码不为 0 时必须留下「哪个请求 + 后端说了什么」，
+    // 否则前端只显示一句「参数错误」，无法定位是哪个接口的参数不对。
+    debugPrint('[业务错误] ${resp.requestOptions.uri} → code=$code message=${data['message']}');
     throw ApiException(
       code is int ? code : -1,
       resolveErrorMessage(code is int ? code : -1, data['message'] as String? ?? '请求失败'),

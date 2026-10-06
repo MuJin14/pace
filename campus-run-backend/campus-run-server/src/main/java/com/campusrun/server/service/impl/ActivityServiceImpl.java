@@ -20,6 +20,7 @@ import com.campusrun.server.service.FenceService;
 import com.campusrun.server.service.GoalService;
 import com.campusrun.server.service.LeaderboardService;
 import com.campusrun.server.util.GpsUtil;
+import com.campusrun.server.util.TrackAnomalyDetector;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -71,9 +72,17 @@ public class ActivityServiceImpl implements ActivityService {
         validate(request);
 
         List<TrackPoint> track = toTrackPoints(request.getTrack());
-        double distance = GpsUtil.totalDistanceMeters(track);
+        // 用「精度过滤后」的距离作为成绩口径：脏点会让距离虚高数倍，
+        // 直接采信会让排行榜失真，用户也会觉得"定位不准"。
+        double distance = GpsUtil.totalDistanceMetersFiltered(track);
+        double rawDistance = GpsUtil.totalDistanceMeters(track);
         if (distance <= 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "轨迹距离为 0");
+        }
+        if (rawDistance > distance * 1.5) {
+            // 脏点占比较高：记录下来，便于定位"用户反馈不准"的真实原因
+            log.warn("轨迹精度较差，过滤后距离大幅缩小：raw={}m filtered={}m points={}",
+                    Math.round(rawDistance), Math.round(distance), track.size());
         }
 
         long durationSeconds = (request.getEndTime() - request.getStartTime()) / 1000;
@@ -106,16 +115,41 @@ public class ActivityServiceImpl implements ActivityService {
 
         activity.setTrackJson(serializeTrack(track));
 
+        // 反作弊第一道闸门：先做轨迹物理合理性校验（与是否专属模式无关，普通跑步同样要查）。
+        // 命中则标记无效并记录原因；无效记录仍会入库，便于人工复核与阈值调参，
+        // 但不会计入排行榜/目标进度/勋章（见下方 invalid 判断）。
+        TrackAnomalyDetector.Anomaly anomaly = TrackAnomalyDetector.detect(
+                track,
+                request.getType(),
+                distance,
+                durationSeconds,
+                request.getStartTime(),
+                System.currentTimeMillis());
+        if (anomaly != null) {
+            activity.setInvalid(1);
+            activity.setInvalidReason(anomaly.message());
+            log.warn("轨迹反作弊命中，userId={}, type={}, anomaly={}, distanceMeters={}, durationSeconds={}",
+                    userId, request.getType(), anomaly.name(), distanceMeters, durationSeconds);
+        }
+
+        // 专属模式再叠加围栏校验；两者取「或」——任一项判无效即为无效。
         if (isExclusiveMode(activity.getMode())) {
             FenceMatchResult match = fenceService.evaluate(track);
-            activity.setInvalid(match.invalid() ? 1 : 0);
             activity.setFenceId(match.fenceId());
             activity.setOutsideRatio(match.outsideRatio());
+            if (match.invalid()) {
+                activity.setInvalid(1);
+                if (activity.getInvalidReason() == null) {
+                    activity.setInvalidReason("轨迹在校园围栏内的比例不足");
+                }
+            }
             if (match.fenceId() != null || match.invalid()) {
                 log.info("围栏校验命中，fenceId={}, outsideRatio={}, invalid={}",
                         match.fenceId(), match.outsideRatio(), match.invalid());
             }
-        } else {
+        }
+
+        if (activity.getInvalid() == null) {
             activity.setInvalid(0);
         }
 
@@ -131,7 +165,8 @@ public class ActivityServiceImpl implements ActivityService {
             }
         }
 
-        log.info("创建运动记录完成，activityId={}, invalid={}", activity.getId(), activity.getInvalid());
+        log.info("创建运动记录完成，activityId={}, invalid={}, invalidReason={}",
+                activity.getId(), activity.getInvalid(), activity.getInvalidReason());
         return buildCreateResponse(activity, (int) durationSeconds);
     }
 
@@ -226,6 +261,7 @@ public class ActivityServiceImpl implements ActivityService {
         response.setType(activity.getType());
         response.setMode(activity.getMode());
         response.setInvalid(activity.getInvalid());
+        response.setInvalidReason(activity.getInvalidReason());
         response.setDistanceMeters(activity.getDistanceMeters());
         response.setDurationSeconds(durationSeconds);
         response.setAvgSpeed(activity.getAvgSpeed());

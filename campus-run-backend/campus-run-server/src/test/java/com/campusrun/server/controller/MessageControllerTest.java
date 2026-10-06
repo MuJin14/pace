@@ -23,8 +23,11 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -100,5 +103,48 @@ class MessageControllerTest {
                         .header("Authorization", "Bearer " + token()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(3004));
+    }
+
+    @Test
+    void markRead_withoutToken_returns401() throws Exception {
+        mockMvc.perform(post("/api/v1/message/read").param("messageIds", "100"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    void markRead_returnsMarkedCount_forAuthenticatedUser() throws Exception {
+        when(messageService.markRead(any(), any())).thenReturn(2);
+
+        mockMvc.perform(post("/api/v1/message/read")
+                        .param("messageIds", "100", "101")
+                        .header("Authorization", "Bearer " + token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(2));
+
+        // 标记对象来自 JWT 中的当前用户，而不是客户端传入的 ID
+        verify(messageService).markRead(eq(1L), eq(List.of(100L, 101L)));
+    }
+
+    @Test
+    void markRead_withoutMessageIds_returnsZero() throws Exception {
+        mockMvc.perform(post("/api/v1/message/read")
+                        .header("Authorization", "Bearer " + token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(0));
+    }
+
+    @Test
+    void markRead_notReceiver_returns403() throws Exception {
+        when(messageService.markRead(any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.FORBIDDEN));
+
+        mockMvc.perform(post("/api/v1/message/read")
+                        .param("messageIds", "100")
+                        .header("Authorization", "Bearer " + token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(403));
     }
 }

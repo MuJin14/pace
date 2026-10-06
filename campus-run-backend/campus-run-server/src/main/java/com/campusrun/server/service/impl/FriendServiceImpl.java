@@ -19,6 +19,7 @@ import com.campusrun.server.event.FriendAcceptedEvent;
 import com.campusrun.server.event.FriendDeletedEvent;
 import com.campusrun.server.event.FriendRequestEvent;
 import com.campusrun.server.service.FriendService;
+import com.campusrun.server.service.UserRelationResolver;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,12 +33,26 @@ public class FriendServiceImpl implements FriendService {
     private final FriendshipMapper friendshipMapper;
     private final UserMapper userMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final UserRelationResolver relationResolver;
 
+    /** Spring 用这个构造器（显式标注，避免与下方兼容构造器产生歧义）。 */
+    @org.springframework.beans.factory.annotation.Autowired
     public FriendServiceImpl(FriendshipMapper friendshipMapper, UserMapper userMapper,
-                            ApplicationEventPublisher eventPublisher) {
+                            ApplicationEventPublisher eventPublisher,
+                            UserRelationResolver relationResolver) {
         this.friendshipMapper = friendshipMapper;
         this.userMapper = userMapper;
         this.eventPublisher = eventPublisher;
+        this.relationResolver = relationResolver;
+    }
+
+    /**
+     * 兼容构造器（既有单测用）：关系解析退化为「只查好友表」的独立实例。
+     * 注意它拿不到 Spring 容器里的 mapper，仅用于不涉及 relation 断言的场景。
+     */
+    public FriendServiceImpl(FriendshipMapper friendshipMapper, UserMapper userMapper,
+                             ApplicationEventPublisher eventPublisher) {
+        this(friendshipMapper, userMapper, eventPublisher, null);
     }
 
     @Override
@@ -52,6 +67,13 @@ public class FriendServiceImpl implements FriendService {
         String kw = keyword.trim();
         long total = friendshipMapper.countSearch(userId, kw);
         List<UserBriefResponse> list = friendshipMapper.searchUsers(userId, kw, offset, safeSize);
+        // 补上关系标记：客户端据此决定「发消息 / 添加好友 / 通过验证」。
+        // 不再排除自己与已有好友——搜到好友要能直接进去聊天。
+        if (relationResolver != null) {
+            for (UserBriefResponse item : list) {
+                item.setRelation(relationResolver.resolve(userId, item.getUserId()).getCode());
+            }
+        }
         return new PageResponse<>(total, safePage, safeSize, list);
     }
 

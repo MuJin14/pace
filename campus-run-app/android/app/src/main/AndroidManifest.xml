@@ -1,9 +1,67 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- 跑步中锁屏/切后台仍需持续记录轨迹：Android 10+ 需后台定位权限，
+         Android 14+ 还需前台服务类型声明。缺失会让一次跑步被切断成多条记录。 -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- 新消息震动提醒。缺少它时 Vibration 包在部分 ROM 上会静默失败，
+         表现为「有通知但不震动」，很难排查。 -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
+
+    <!-- ⚠️⚠️ 「应用内更新」必需，**不是可选项**。
+         用户反馈过「下载完了没弹安装界面」——根因就是缺这一行。
+
+         Android 8.0（API 26）起，应用要唤起系统安装器必须持有这个权限。
+         没有它时系统会**静默拒绝**安装意图：既不弹安装界面、也不报错，
+         而 open_filex 那边只负责「把意图交出去」，可能仍返回成功，
+         于是界面上什么都不显示 —— 用户看到的就是「点了没反应」。
+
+         声明后用户首次更新时，系统会弹「允许行迹安装应用」的授权页；
+         用户同意后照常安装。若用户拒绝，open_filex 会返回
+         permissionDenied，届时 App 会提示去设置里开启。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
+    <!-- ── 保存聊天图片到相册 ─────────────────────────────────────
+         用 gal 包保存。它的 manifest 是**空的**（靠运行时检查），
+         所以这里要显式声明，否则用户点「保存」会直接失败。
+
+         maxSdkVersion=28 是刻意的：Android 10（API 29）起改为分区存储，
+         保存图片走 MediaStore，**不再需要**这个权限。
+         不限版本的话会在新系统上申请一个无意义的权限，
+         某些 ROM 的应用商店审核也会因此报「过度申请权限」。 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28"/>
+    <!-- Android 13（API 33）起读媒体需要细分权限。保存本身只需写权限，
+         但部分机型在「已存在同名文件」时会先查一次相册。
+         注：`<uses-permission>` 只支持 maxSdkVersion，没有 minSdkVersion 属性；
+         READ_MEDIA_IMAGES 只在 API 33+ 存在，旧系统会自动忽略它。 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <!-- ⚠️ usesCleartextTraffic 是**必需项**，不是可选优化。
+         Android 9（API 28）起默认禁止明文 HTTP，而我们的部署形态是
+         http://<服务器IP>:8080 —— 境内服务器未备案域名的 80/443 会被
+         腾讯云按备案要求拦截（302 → dnspod webblock），因此走非标准端口
+         的 HTTP 直连。不加这一行，App 所有请求都会直接失败，
+         且报错信息只会说「网络连接失败」，极难定位。
+         将来若改成 HTTPS，可移除本项。 -->
+    <!-- 图标：icon 用于常规启动器；roundIcon 供 Android 7.1+ 的「圆形图标」
+         主题优先使用。只声明 icon 时，圆形主题会退回用方形图再被系统裁圆，
+         与启动器里显示的自适应图标不一致。
+         两个资源内容相同（都是 adaptive-icon 定义），形状由系统决定。 -->
     <application
-        android:label="campus_run_app"
+        android:label="行迹"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -31,6 +89,7 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

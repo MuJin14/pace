@@ -15,10 +15,14 @@ public class GoalCreateRequest {
     @Min(value = 1, message = "目标距离不合法")
     private Integer targetDistanceMeters;
 
-    @NotNull(message = "开始日期不能为空")
+    /**
+     * 开始日期：periodType=custom 时必填；weekly / monthly 由服务端按 Asia/Shanghai 推导，客户端传值会被忽略。
+     */
     private LocalDate startDate;
 
-    @NotNull(message = "结束日期不能为空")
+    /**
+     * 结束日期：periodType=custom 时必填；weekly / monthly 由服务端按 Asia/Shanghai 推导，客户端传值会被忽略。
+     */
     private LocalDate endDate;
 
     public String getPeriodType() {

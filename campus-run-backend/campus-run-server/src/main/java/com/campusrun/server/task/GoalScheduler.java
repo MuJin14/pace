@@ -10,13 +10,19 @@ import org.springframework.stereotype.Component;
 public class GoalScheduler {
 
     private final GoalService goalService;
+    private final ScheduledJobLockService jobLock;
 
-    public GoalScheduler(GoalService goalService) {
+    public GoalScheduler(GoalService goalService, ScheduledJobLockService jobLock) {
         this.goalService = goalService;
+        this.jobLock = jobLock;
     }
 
     @Scheduled(cron = "0 5 0 * * ?")
     public void expireOutdated() {
+        // 多实例下若不互斥，过期目标会被重复结算（重复置为 COMPLETED/EXPIRED）。
+        if (!jobLock.tryAcquireToday("goal.expireOutdated")) {
+            return;
+        }
         goalService.expireOutdated();
     }
 }

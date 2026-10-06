@@ -5,9 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/validators.dart';
-import '../../../core/widgets/primary_button.dart';
+import '../../../core/widgets/auth_scaffold.dart';
 import '../providers/auth_provider.dart';
 
+/// 注册页（极简白底风），与登录页共用 [AuthScaffold] 版式。
 class RegisterPage extends ConsumerStatefulWidget {
   const RegisterPage({super.key});
 
@@ -22,6 +23,12 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   final _passwordController = TextEditingController();
   bool _submitting = false;
 
+  /// 见 `login_page.dart` 的说明 —— 注册同样必须主动同意。
+  bool _agreed = false;
+
+  /// 密码框是否正在被编辑 —— 驱动背景「闭眼」（见登录页的说明）。
+  bool _passwordFocused = false;
+
   @override
   void dispose() {
     _phoneController.dispose();
@@ -32,6 +39,11 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_agreed) {
+      _show('请先阅读并同意《用户协议与隐私政策》');
+      return;
+    }
+    FocusScope.of(context).unfocus();
     setState(() => _submitting = true);
     try {
       await ref.read(authProvider.notifier).register(
@@ -50,139 +62,84 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   void _show(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.textPrimary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+        ),
+      ));
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: AppColors.primaryGradient,
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
-                const SizedBox(height: 48),
-                _brandHeader(),
-                const SizedBox(height: 40),
-                _formCard(context),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _brandHeader() {
-    return Column(
-      children: [
-        Container(
-          width: 72,
-          height: 72,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.18),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
-          ),
-          child: const Icon(Icons.directions_run, size: 40, color: Colors.white),
-        ),
-        const SizedBox(height: 16),
-        const Text(
-          '加入校园跑',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 26,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '和同学一起，跑起来',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.85),
-            fontSize: 15,
+    return AuthScaffold(
+      slogan: '和同学一起，跑起来',
+      title: '创建账号',
+      subtitle: '注册后自动生成你的专属 ID',
+      eyeClosed: _passwordFocused,
+      formChildren: [
+        Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AuthField(
+                controller: _phoneController,
+                hint: '手机号',
+                icon: Icons.phone_android,
+                keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.next,
+                validator: Validators.validatePhone,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AuthField(
+                controller: _nicknameController,
+                hint: '昵称',
+                icon: Icons.person_outline,
+                textInputAction: TextInputAction.next,
+                maxLength: 30,
+                validator: Validators.validateNickname,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AuthField(
+                controller: _passwordController,
+                hint: '密码（至少 6 位）',
+                icon: Icons.lock_outline,
+                obscure: true,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _submit(),
+                validator: Validators.validatePassword,
+                onFocusChange: (focused) =>
+                    setState(() => _passwordFocused = focused),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AgreementCheckbox(
+                value: _agreed,
+                onChanged: (v) => setState(() => _agreed = v),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              AuthPrimaryButton(
+                label: '注册',
+                loading: _submitting,
+                onPressed: _submit,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AuthSwitchRow(
+                prompt: '已有账号？',
+                actionLabel: '去登录',
+                // pop 回到登录页；若注册页是被深链直接打开的（栈里只有它），
+                // pop 无处可去，退化成 go 登录页，避免按钮点了没反应。
+                onAction: () =>
+                    context.canPop() ? context.pop() : context.go('/login'),
+              ),
+            ],
           ),
         ),
       ],
-    );
-  }
-
-  Widget _formCard(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-      decoration: const BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-      ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              '创建账号',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              '注册后自动生成你的专属 ID',
-              style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 24),
-            TextFormField(
-              controller: _phoneController,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                hintText: '手机号',
-                prefixIcon: Icon(Icons.phone_android, color: AppColors.textHint),
-              ),
-              validator: Validators.validatePhone,
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _nicknameController,
-              decoration: const InputDecoration(
-                hintText: '昵称',
-                prefixIcon: Icon(Icons.person_outline, color: AppColors.textHint),
-              ),
-              validator: Validators.validateNickname,
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                hintText: '密码（至少 6 位）',
-                prefixIcon: Icon(Icons.lock_outline, color: AppColors.textHint),
-              ),
-              validator: Validators.validatePassword,
-            ),
-            const SizedBox(height: 28),
-            PrimaryButton(
-              label: '注册',
-              loading: _submitting,
-              onPressed: _submit,
-            ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: () => context.pop(),
-              child: const Text('已有账号？去登录'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

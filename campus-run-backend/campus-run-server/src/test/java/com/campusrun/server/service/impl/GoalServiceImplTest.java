@@ -1,5 +1,6 @@
 package com.campusrun.server.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.campusrun.common.exception.BusinessException;
 import com.campusrun.common.result.ErrorCode;
 import com.campusrun.server.dto.request.GoalCreateRequest;
@@ -161,5 +162,141 @@ class GoalServiceImplTest {
 
         assertEquals(GoalStatus.COMPLETED.getCode(), goalMapper.selectById(reached.getId()).getStatus());
         assertEquals(GoalStatus.EXPIRED.getCode(), goalMapper.selectById(missed.getId()).getStatus());
+    }
+
+    // ---------- 周期日期服务端推导 ----------
+
+    private GoalCreateRequest request(String periodType, int target, LocalDate start, LocalDate end) {
+        GoalCreateRequest req = new GoalCreateRequest();
+        req.setPeriodType(periodType);
+        req.setTargetDistanceMeters(target);
+        req.setStartDate(start);
+        req.setEndDate(end);
+        return req;
+    }
+
+    @Test
+    void create_weekly_derivesCurrentWeekMondayToSunday_ignoringClientDates() {
+        Long userId = register("13700000011");
+        // 客户端传了错误甚至倒序的日期：weekly 一律由服务端推导并忽略
+        GoalCreateRequest req = request("weekly", 15000,
+                LocalDate.of(2000, 1, 1), LocalDate.of(1999, 1, 1));
+
+        GoalResponse created = goalService.create(userId, req);
+
+        LocalDate monday = LocalDate.now(ZONE).with(DayOfWeek.MONDAY);
+        assertEquals(monday, created.getStartDate());
+        assertEquals(monday.plusDays(6), created.getEndDate());
+
+        UserGoal saved = goalMapper.selectById(created.getId());
+        assertEquals(monday, saved.getStartDate());
+        assertEquals(monday.plusDays(6), saved.getEndDate());
+    }
+
+    @Test
+    void create_weekly_withoutDates_succeeds() {
+        Long userId = register("13700000012");
+
+        GoalResponse created = goalService.create(userId, request("weekly", 15000, null, null));
+
+        LocalDate monday = LocalDate.now(ZONE).with(DayOfWeek.MONDAY);
+        assertEquals(monday, created.getStartDate());
+        assertEquals(monday.plusDays(6), created.getEndDate());
+    }
+
+    @Test
+    void create_monthly_derivesFirstDayToLastDay_ignoringClientDates() {
+        Long userId = register("13700000013");
+        GoalCreateRequest req = request("monthly", 60000,
+                LocalDate.of(2000, 5, 20), LocalDate.of(2000, 5, 21));
+
+        GoalResponse created = goalService.create(userId, req);
+
+        LocalDate today = LocalDate.now(ZONE);
+        assertEquals(today.withDayOfMonth(1), created.getStartDate());
+        assertEquals(today.withDayOfMonth(today.lengthOfMonth()), created.getEndDate());
+
+        UserGoal saved = goalMapper.selectById(created.getId());
+        assertEquals(today.withDayOfMonth(1), saved.getStartDate());
+        assertEquals(today.withDayOfMonth(today.lengthOfMonth()), saved.getEndDate());
+    }
+
+    @Test
+    void create_monthly_withoutDates_succeeds() {
+        Long userId = register("13700000014");
+
+        GoalResponse created = goalService.create(userId, request("monthly", 60000, null, null));
+
+        LocalDate today = LocalDate.now(ZONE);
+        assertEquals(today.withDayOfMonth(1), created.getStartDate());
+        assertEquals(today.withDayOfMonth(today.lengthOfMonth()), created.getEndDate());
+    }
+
+    @Test
+    void create_custom_keepsClientDates() {
+        Long userId = register("13700000015");
+        LocalDate start = LocalDate.now(ZONE).plusDays(1);
+        LocalDate end = start.plusDays(30);
+
+        GoalResponse created = goalService.create(userId, request("custom", 30000, start, end));
+
+        assertEquals(start, created.getStartDate());
+        assertEquals(end, created.getEndDate());
+    }
+
+    @Test
+    void create_custom_withoutDates_throwsParamError() {
+        Long userId = register("13700000016");
+
+        BusinessException noDates = assertThrows(BusinessException.class,
+                () -> goalService.create(userId, request("custom", 30000, null, null)));
+        assertEquals(ErrorCode.PARAM_ERROR.getCode(), noDates.getCode());
+
+        BusinessException onlyStart = assertThrows(BusinessException.class,
+                () -> goalService.create(userId,
+                        request("custom", 30000, LocalDate.now(ZONE), null)));
+        assertEquals(ErrorCode.PARAM_ERROR.getCode(), onlyStart.getCode());
+
+        BusinessException onlyEnd = assertThrows(BusinessException.class,
+                () -> goalService.create(userId,
+                        request("custom", 30000, null, LocalDate.now(ZONE))));
+        assertEquals(ErrorCode.PARAM_ERROR.getCode(), onlyEnd.getCode());
+
+        assertEquals(0L, goalMapper.selectCount(new LambdaQueryWrapper<UserGoal>()
+                .eq(UserGoal::getUserId, userId)));
+    }
+
+    @Test
+    void create_custom_endBeforeStart_throwsParamError() {
+        Long userId = register("13700000017");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> goalService.create(userId, request("custom", 30000,
+                        LocalDate.of(2026, 3, 10), LocalDate.of(2026, 3, 1))));
+        assertEquals(ErrorCode.PARAM_ERROR.getCode(), ex.getCode());
+    }
+
+    @Test
+    void create_invalidPeriodType_throwsParamError() {
+        Long userId = register("13700000018");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> goalService.create(userId, request("yearly", 30000, null, null)));
+        assertEquals(ErrorCode.PARAM_ERROR.getCode(), ex.getCode());
+    }
+
+    @Test
+    void addProgress_matchesServerDerivedWeeklyPeriod() {
+        Long userId = register("13700000019");
+        GoalResponse goal = goalService.create(userId, request("weekly", 10000, null, null));
+
+        LocalDate monday = LocalDate.now(ZONE).with(DayOfWeek.MONDAY);
+        // 本周内的运动 → 累加
+        goalService.addProgress(userId, 3000, monday.plusDays(2).atStartOfDay());
+        // 上一周的运动 → 不累加
+        goalService.addProgress(userId, 5000, monday.minusWeeks(1).plusDays(2).atStartOfDay());
+
+        // 推导出的 [周一, 周日] 必须与 addProgress 的周期匹配语义一致
+        assertEquals(3000, goalMapper.selectById(goal.getId()).getCurrentDistanceMeters());
     }
 }

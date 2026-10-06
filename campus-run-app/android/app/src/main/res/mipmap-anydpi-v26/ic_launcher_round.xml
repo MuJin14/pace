@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 背景用渐变 drawable，与 legacy PNG 的外观保持一致。
+         之前这里是 @color/ic_launcher_background（纯色），
+         导致启动器与应用信息页的图标底色不同。 -->
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

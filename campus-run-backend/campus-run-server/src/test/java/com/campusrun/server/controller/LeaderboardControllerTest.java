@@ -65,7 +65,10 @@ class LeaderboardControllerTest {
         entry.setDistanceMeters(15230);
         PageResponse<LeaderboardEntryResponse> pageResp =
                 new PageResponse<>(128L, 1L, 20L, List.of(entry));
-        when(leaderboardService.getBoard(any(), any(), any(), anyLong(), anyLong())).thenReturn(pageResp);
+        // 控制器现在会把当前登录用户传下去（用于给每条记录标注 relation），
+        // 存根必须匹配 6 参重载，否则返回 null 导致断言失败。
+        when(leaderboardService.getBoard(any(), any(), any(), anyLong(), anyLong(), any()))
+                .thenReturn(pageResp);
 
         mockMvc.perform(get("/api/v1/leaderboard")
                         .header("Authorization", "Bearer " + token())

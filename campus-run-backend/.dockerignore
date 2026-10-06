@@ -1,0 +1,33 @@
+# Docker 构建上下文排除项。
+#
+# 为什么需要：构建上下文默认包含所有文件，本地的 target/ 可能有几百 MB，
+# 传到 Docker daemon 会白等很久。排除后构建明显更快。
+
+# Maven 构建产物
+target/
+*/target/
+**/target/
+
+# 上传的头像（要随数据迁移，不该打进镜像）
+uploads/
+**/uploads/
+
+# 本地配置与密钥（绝不能进镜像）
+.env
+.env.*
+*.pem
+*.key
+
+# 版本控制
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 文档与临时文件
+docs/*.md
+*.log
+*.tmp

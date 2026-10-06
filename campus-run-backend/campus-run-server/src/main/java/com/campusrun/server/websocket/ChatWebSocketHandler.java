@@ -56,8 +56,15 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     JsonNode data = root.path("data");
                     Long receiverId = data.hasNonNull("receiverId") ? data.get("receiverId").asLong() : null;
                     String content = data.path("content").asText(null);
-                    ChatMessageResponse resp = messageService.sendMessage(userId, receiverId, content);
-                    send(session, new WsMessage("ack", resp));
+                    // type / mediaUrl 用于图片与表情包；不传时按文本处理，兼容旧客户端。
+                    Integer msgType = data.hasNonNull("type") ? data.get("type").asInt() : null;
+                    String mediaUrl = data.path("mediaUrl").asText(null);
+                    // 客户端可选携带 clientMsgId：原样回显在 ack / error 里，
+                    // 让客户端把响应与「哪一次发送」精确配对，而不是按 FIFO 猜。
+                    String clientMsgId = data.path("clientMsgId").asText(null);
+                    ChatMessageResponse resp =
+                            messageService.sendMessage(userId, receiverId, content, msgType, mediaUrl);
+                    send(session, new WsMessage("ack", withClientMsgId(resp, clientMsgId)));
                 }
                 case "heartbeat" -> {
                     sessionManager.touch(userId);
@@ -70,6 +77,22 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         } catch (Exception e) {
             send(session, error(ErrorCode.PARAM_ERROR.getCode(), "消息格式错误"));
         }
+    }
+
+    /**
+     * 把 clientMsgId 附加到 ack 的响应体上。
+     *
+     * <p>用 Map 承载而不是给 {@code ChatMessageResponse} 加字段：clientMsgId 是
+     * **传输层的关联标识**，不属于消息的业务模型，放进 DTO 会污染领域对象。
+     */
+    @SuppressWarnings("unchecked")
+    private Object withClientMsgId(ChatMessageResponse resp, String clientMsgId) {
+        if (clientMsgId == null || clientMsgId.isBlank()) {
+            return resp;
+        }
+        Map<String, Object> payload = objectMapper.convertValue(resp, Map.class);
+        payload.put("clientMsgId", clientMsgId);
+        return payload;
     }
 
     @Override
@@ -98,5 +121,15 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     private WsMessage error(int code, String message) {
         return new WsMessage("error", Map.of("code", code, "message", message));
+    }
+
+    private WsMessage error(int code, String message, String clientMsgId) {
+        Map<String, Object> data = new java.util.HashMap<>();
+        data.put("code", code);
+        data.put("message", message);
+        if (clientMsgId != null && !clientMsgId.isBlank()) {
+            data.put("clientMsgId", clientMsgId);
+        }
+        return new WsMessage("error", data);
     }
 }

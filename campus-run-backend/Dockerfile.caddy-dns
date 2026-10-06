@@ -1,0 +1,17 @@
+# 自定义 Caddy 镜像：内置 Cloudflare DNS 插件
+#
+# 为什么需要：
+#   本服务器在腾讯云境内，80/443 被按备案要求拦截（跳 webblock），
+#   导致 Let's Encrypt 的 http-01 / tls-alpn-01 验证无法完成。
+#   DNS-01 验证只需要能改 DNS 记录（走 Cloudflare API），
+#   完全不依赖任何入站端口，因此可以稳定签发证书。
+#
+# 构建（在服务器上执行，约 2-5 分钟）：
+#   docker build -f Dockerfile.caddy-dns -t caddy-cloudflare:2 .
+
+FROM caddy:2-builder AS builder
+RUN xcaddy build \
+    --with github.com/caddy-dns/cloudflare
+
+FROM caddy:2
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy

@@ -4,14 +4,23 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/widgets/empty_state.dart';
+import '../../../core/utils/formatters.dart';
+import '../../../core/widgets/app_card.dart';
+import '../../../core/widgets/app_empty_hint.dart';
+import '../../../core/widgets/app_section_title.dart';
+import '../../../core/widgets/error_state.dart';
 import '../../../core/widgets/user_avatar.dart';
 import '../../../data/models/friend_item.dart';
 import '../../../data/models/friend_request.dart';
 import '../../../data/repositories/friend_repository.dart';
+import '../providers/friend_badge_provider.dart';
 import '../providers/friend_provider.dart';
 
 /// 好友页：待处理申请 + 好友列表。
+///
+/// 三态：加载中 / 错误（可重试）/ 空态（召唤语 + 可点动作）。
+/// 好友申请链路：发送 → 收到 → 接受 / 拒绝 → 列表刷新；
+/// 拒绝 = 后端删除 PENDING 记录（不保留 REJECTED，遵循项目约定）。
 class FriendsPage extends ConsumerWidget {
   const FriendsPage({super.key});
 
@@ -22,7 +31,7 @@ class FriendsPage extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('好友'),
+        title: const Text('社区'),
         actions: [
           IconButton(
             icon: const Icon(Icons.person_add_alt_1),
@@ -42,15 +51,16 @@ class FriendsPage extends ConsumerWidget {
         },
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.pageWide,
+            AppSpacing.sm,
+            AppSpacing.pageWide,
+            AppSpacing.lg,
+          ),
           children: [
             _RequestsSection(async: requestsAsync),
-            const SizedBox(height: 16),
-            Text(
-              '我的好友',
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-            ),
-            const SizedBox(height: 12),
+            const AppSectionTitle(title: '我的好友'),
+            const SizedBox(height: AppSpacing.smLg),
             _FriendsSection(async: friendsAsync),
           ],
         ),
@@ -59,6 +69,7 @@ class FriendsPage extends ConsumerWidget {
   }
 }
 
+/// 好友申请区块：加载中 / 错误（内联重试，不阻塞好友列表）/ 空（整块隐藏）。
 class _RequestsSection extends ConsumerWidget {
   const _RequestsSection({required this.async});
 
@@ -66,35 +77,124 @@ class _RequestsSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (async.isLoading && !async.hasValue) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: AppSpacing.block),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (async.hasError && !async.hasValue) {
+      final err = async.error;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.block),
+        child: AppCard(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  err is ApiException ? err.message : '好友申请加载失败',
+                  style: const TextStyle(
+                    fontSize: AppFontSize.body,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => ref.invalidate(friendRequestsProvider),
+                child: const Text(
+                  '重试',
+                  style: TextStyle(
+                    fontSize: AppFontSize.body,
+                    fontWeight: AppFontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final requests = async.value ?? const <FriendRequest>[];
     if (requests.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          '好友申请',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+        Row(
+          children: [
+            const Expanded(child: AppSectionTitle(title: '好友申请')),
+            const SizedBox(width: AppSpacing.sm),
+            _CountBadge(count: requests.length),
+          ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.smLg),
         ...requests.map((r) => _RequestCard(
               request: r,
-              onAccept: () => _act(context, ref, () => ref.read(friendRepositoryProvider).accept(r.requestId)),
-              onReject: () => _act(context, ref, () => ref.read(friendRepositoryProvider).reject(r.requestId)),
+              onAccept: () => _act(
+                context,
+                ref,
+                () => ref.read(friendRepositoryProvider).accept(r.requestId),
+                '已添加「${r.nickname}」为好友',
+              ),
+              // 拒绝 = 删除 PENDING 记录，不保留 REJECTED 状态。
+              onReject: () => _act(
+                context,
+                ref,
+                () => ref.read(friendRepositoryProvider).reject(r.requestId),
+                '已忽略「${r.nickname}」的申请',
+              ),
             )),
+        const SizedBox(height: AppSpacing.block),
       ],
     );
   }
 
-  Future<void> _act(BuildContext context, WidgetRef ref, Future<void> Function() action) async {
+  Future<void> _act(
+    BuildContext context,
+    WidgetRef ref,
+    Future<void> Function() action,
+    String successText,
+  ) async {
     try {
       await action();
       ref.invalidate(friendListProvider);
       ref.invalidate(friendRequestsProvider);
+      if (context.mounted) _toast(context, successText);
     } on ApiException catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
+      if (context.mounted) _toast(context, e.message);
     }
+  }
+}
+
+/// 统一 SnackBar 反馈（样式由 AppTheme.snackBarTheme 提供）。
+void _toast(BuildContext context, String message) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+}
+
+class _CountBadge extends StatelessWidget {
+  const _CountBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xxs),
+      decoration: BoxDecoration(
+        color: AppColors.danger,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+      ),
+      child: Text(
+        '$count',
+        style: const TextStyle(
+          fontSize: AppFontSize.caption,
+          fontWeight: AppFontWeight.bold,
+          color: AppColors.onPrimary,
+        ),
+      ),
+    );
   }
 }
 
@@ -107,21 +207,33 @@ class _RequestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(18)),
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: AppSpacing.gap10),
+      padding: const EdgeInsets.all(AppSpacing.gap14),
       child: Row(
         children: [
           UserAvatar(nickname: request.nickname, avatarUrl: request.avatarUrl, size: 46),
-          const SizedBox(width: 12),
+          const SizedBox(width: AppSpacing.smLg),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(request.nickname, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                const SizedBox(height: 2),
-                Text(request.uniqueId, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                Text(
+                  request.nickname,
+                  style: const TextStyle(
+                    fontSize: AppFontSize.title,
+                    fontWeight: AppFontWeight.medium,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  Formatters.uniqueId(request.uniqueId),
+                  style: const TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
               ],
             ),
           ),
@@ -130,16 +242,23 @@ class _RequestCard extends StatelessWidget {
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.textSecondary.withValues(alpha: 0.1),
               foregroundColor: AppColors.textSecondary,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.gap10,
+              ),
             ),
             child: const Text('拒绝'),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           FilledButton(
             onPressed: onAccept,
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              foregroundColor: AppColors.onPrimary,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.gap10,
+              ),
             ),
             child: const Text('接受'),
           ),
@@ -156,27 +275,37 @@ class _FriendsSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 本区块嵌在页面的 ListView 内（高度不受限），因此不用 ScrollableCenter 包裹。
     return async.when(
       loading: () => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 40),
+        padding: EdgeInsets.symmetric(vertical: AppSpacing.xxl),
         child: Center(child: CircularProgressIndicator()),
       ),
-      error: (err, _) => _ErrorView(
-        message: err is ApiException ? err.message : '加载失败',
+      error: (err, _) => ErrorState(
+        message: err is ApiException ? err.message : '好友列表加载失败，请稍后重试',
         onRetry: () => ref.invalidate(friendListProvider),
       ),
       data: (friends) {
         if (friends.isEmpty) {
-          return const EmptyState(
-            icon: Icons.people_outline,
-            title: '还没有好友',
-            subtitle: '点击右上角添加好友，一起约跑吧',
+          // 区块内空态用 AppEmptyHint（页面级空态才用 EmptyState）。
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+            child: AppEmptyHint(
+              icon: Icons.people_outline,
+              title: '还没有好友',
+              description: '添加同学为好友，一起约跑更容易坚持',
+              actionLabel: '去添加好友',
+              onAction: () => context.push('/friends/search'),
+            ),
           );
         }
         return Column(
           children: friends.map((f) => _FriendItem(
                 friend: f,
-                onTap: () => context.push('/chat/${f.userId}', extra: f.nickname),
+                onTap: () => context.push(
+                  '/chat/${f.userId}',
+                  extra: {'name': f.nickname, 'avatarUrl': f.avatarUrl},
+                ),
                 onDelete: () => _confirmDelete(context, ref, f),
               )).toList(),
         );
@@ -200,15 +329,14 @@ class _FriendsSection extends ConsumerWidget {
     try {
       await ref.read(friendRepositoryProvider).delete(f.friendshipId);
       ref.invalidate(friendListProvider);
+      if (context.mounted) _toast(context, '已删除好友「${f.nickname}」');
     } on ApiException catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
+      if (context.mounted) _toast(context, e.message);
     }
   }
 }
 
-class _FriendItem extends StatelessWidget {
+class _FriendItem extends ConsumerWidget {
   const _FriendItem({required this.friend, required this.onTap, required this.onDelete});
 
   final FriendItem friend;
@@ -216,22 +344,59 @@ class _FriendItem extends StatelessWidget {
   final VoidCallback onDelete;
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(18)),
+  Widget build(BuildContext context, WidgetRef ref) {
+    // 订阅「按好友计的未读数」：只有这个好友有未读时，这一行才显示红点。
+    // 用 select 只取自己那一项，避免别人来消息时整张列表都重建。
+    final unread = ref.watch(
+      friendBadgeProvider.select((s) => s.unreadOf(friend.userId)),
+    );
+
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: AppSpacing.gap10),
+      padding: EdgeInsets.zero,
       child: ListTile(
         onTap: onTap,
-        leading: UserAvatar(nickname: friend.nickname, avatarUrl: friend.avatarUrl, size: 46),
-        title: Text(friend.nickname, style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-        subtitle: Text(friend.uniqueId, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-        trailing: PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, color: AppColors.textHint),
-          onSelected: (v) {
-            if (v == 'delete') onDelete();
-          },
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'delete', child: Text('删除好友')),
+        leading: _AvatarWithUnread(
+          nickname: friend.nickname,
+          avatarUrl: friend.avatarUrl,
+          unread: unread,
+        ),
+        title: Text(
+          friend.nickname,
+          style: const TextStyle(
+            fontSize: AppFontSize.title,
+            fontWeight: AppFontWeight.medium,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        subtitle: Text(
+          // 有未读时副标题换成「N 条新消息」——微信也是这个做法：
+          // 用户扫一眼就知道哪一行有事，不必逐行看是谁。
+          unread > 0 ? '$unread 条新消息' : Formatters.uniqueId(friend.uniqueId),
+          style: TextStyle(
+            fontSize: AppFontSize.caption,
+            color: unread > 0 ? AppColors.primary : AppColors.textSecondary,
+            fontWeight: unread > 0 ? AppFontWeight.medium : AppFontWeight.regular,
+          ),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 数字角标（>99 显示 99+），与头像上的小圆点是两套强度：
+            // 小圆点负责「一眼看到哪行」，数字负责「积了多少」。
+            if (unread > 0) ...[
+              _UnreadCountBadge(count: unread),
+              const SizedBox(width: AppSpacing.xs),
+            ],
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: AppColors.textHint),
+              onSelected: (v) {
+                if (v == 'delete') onDelete();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'delete', child: Text('删除好友')),
+              ],
+            ),
           ],
         ),
       ),
@@ -239,21 +404,73 @@ class _FriendItem extends StatelessWidget {
   }
 }
 
-class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.message, required this.onRetry});
+/// 头像 + 右上角未读小红点。
+class _AvatarWithUnread extends StatelessWidget {
+  const _AvatarWithUnread({
+    required this.nickname,
+    required this.avatarUrl,
+    required this.unread,
+  });
 
-  final String message;
-  final VoidCallback onRetry;
+  final String nickname;
+  final String? avatarUrl;
+  final int unread;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        children: [
-          Text(message, style: const TextStyle(color: AppColors.textSecondary)),
-          const SizedBox(height: 12),
-          ElevatedButton(onPressed: onRetry, child: const Text('重试')),
-        ],
+    final avatar = UserAvatar(nickname: nickname, avatarUrl: avatarUrl, size: 46);
+    if (unread <= 0) return avatar;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        avatar,
+        Positioned(
+          right: -2,
+          top: -2,
+          child: Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: AppColors.danger,
+              shape: BoxShape.circle,
+              // 白边让红点在任何头像上都看得清（头像可能是深色的）
+              border: Border.all(color: AppColors.card, width: 2),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 未读条数角标。
+class _UnreadCountBadge extends StatelessWidget {
+  const _UnreadCountBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    // 超过 99 收敛成 99+：数字再长会把昵称挤没
+    final label = count > 99 ? '99+' : '$count';
+    return Container(
+      constraints: const BoxConstraints(minWidth: 20),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.gap6,
+        vertical: AppSpacing.xxs,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.danger,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+      ),
+      child: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: AppFontSize.tiny,
+          fontWeight: AppFontWeight.bold,
+          color: AppColors.onPrimary,
+        ),
       ),
     );
   }

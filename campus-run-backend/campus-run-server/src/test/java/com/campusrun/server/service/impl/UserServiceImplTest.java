@@ -14,6 +14,9 @@ import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -51,5 +54,36 @@ class UserServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> new UserServiceImpl(userMapper).getCurrentUser(1L));
         assertEquals(ErrorCode.USER_NOT_FOUND.getCode(), ex.getCode());
+    }
+
+    @Test
+    void deleteAccount_clearsAllUserDataThenUserRow() {
+        User user = new User();
+        user.setId(7L);
+        when(userMapper.selectById(7L)).thenReturn(user);
+
+        new UserServiceImpl(userMapper).deleteAccount(7L);
+
+        // 七张子表都要清，最后才删主表；漏掉任一张都会留下孤儿数据（也是合规问题）。
+        var order = inOrder(userMapper);
+        order.verify(userMapper).deleteActivities(7L);
+        order.verify(userMapper).deleteFriendships(7L);
+        order.verify(userMapper).deleteMessages(7L);
+        order.verify(userMapper).deleteLeaderboardStats(7L);
+        order.verify(userMapper).deleteGoals(7L);
+        order.verify(userMapper).deleteUserBadges(7L);
+        order.verify(userMapper).deleteUserStats(7L);
+        order.verify(userMapper).deleteById(7L);
+    }
+
+    @Test
+    void deleteAccount_userNotFound_throwsAndDeletesNothing() {
+        when(userMapper.selectById(7L)).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> new UserServiceImpl(userMapper).deleteAccount(7L));
+        assertEquals(ErrorCode.USER_NOT_FOUND.getCode(), ex.getCode());
+        verify(userMapper, never()).deleteActivities(7L);
+        verify(userMapper, never()).deleteById(7L);
     }
 }

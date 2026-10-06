@@ -1,0 +1,33 @@
+name: flutter_ui
+description: A generated Flutter project.
+version: 1.0.0+1
+environment:
+  sdk: '>=3.0.1 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  flutter_svg: ^2.0.14
+  webview_flutter: ^4.13.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/fonts/
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Medium_1.otf
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-SemiBold_1.otf
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular_1.otf
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Bold_1.otf

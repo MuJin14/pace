@@ -20,4 +20,11 @@ class TrackPoint {
       accuracy: (json['accuracy'] as num?)?.toDouble(),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'latitude': latitude,
+        'longitude': longitude,
+        'timestamp': timestamp,
+        'accuracy': accuracy,
+      };
 }

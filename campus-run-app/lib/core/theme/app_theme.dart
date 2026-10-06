@@ -1,49 +1,72 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-/// 全局配色。统一色板，避免各页面散落硬编码颜色。
-class AppColors {
-  AppColors._();
+import 'app_font_size.dart';
+import 'app_spacing.dart';
+import 'theme_palette.dart';
 
-  /// 主色：清新绿（跑步/品牌主色）
-  static const Color primary = Color(0xFF10B981);
+export 'app_font_size.dart';
+export 'app_spacing.dart';
+export 'theme_palette.dart';
 
-  /// 主色渐变（按钮/头部用）
-  static const List<Color> primaryGradient = [
-    Color(0xFF10B981),
-    Color(0xFF06B6D4),
+/// 圆角：既有 4 档（8 / 12 / 16 / 24）+ 极小组件档。
+class AppRadius {
+  AppRadius._();
+
+  static const double xxs = 6; // 迷你柱状图柱体
+  static const double xs = 8;
+  static const double sm = 12; // 按钮、输入框
+  static const double md = 16; // 卡片
+  static const double lg = 24; // 弹窗 / 大卡片
+  static const double pill = 999; // 胶囊（chip / 药丸按钮）
+}
+
+/// 字重：统一 3 档（400 / 500 / 700）。
+class AppFontWeight {
+  AppFontWeight._();
+
+  static const FontWeight regular = FontWeight.w400;
+  static const FontWeight medium = FontWeight.w500;
+  static const FontWeight bold = FontWeight.w700;
+}
+
+/// 阴影：极轻，不使用 Material 默认阴影。
+class AppShadows {
+  AppShadows._();
+
+  static const List<BoxShadow> card = [
+    BoxShadow(color: Color(0x0F241F1C), blurRadius: 10, offset: Offset(0, 4)),
   ];
 
-  /// 跑步绿
-  static const Color run = Color(0xFF10B981);
-
-  /// 骑行蓝
-  static const Color ride = Color(0xFF0EA5E9);
-
-  /// 奖牌金
-  static const Color gold = Color(0xFFF59E0B);
-
-  /// 警示红
-  static const Color danger = Color(0xFFEF4444);
-
-  static const Color background = Color(0xFFF5F7FA);
-  static const Color card = Colors.white;
-  static const Color textPrimary = Color(0xFF111827);
-  static const Color textSecondary = Color(0xFF6B7280);
-  static const Color textHint = Color(0xFF9CA3AF);
-  static const Color divider = Color(0xFFE5E7EB);
+  /// 中央凸起 FAB 的悬浮阴影（黑色 15%）。
+  static const List<BoxShadow> fab = [
+    BoxShadow(color: Color(0x26000000), blurRadius: 8, offset: Offset(0, 2)),
+  ];
 }
 
 /// 应用主题。
 class AppTheme {
   AppTheme._();
 
+  /// 手动构造 ColorScheme（禁用 fromSeed）。
+  static final ColorScheme _scheme = ColorScheme.light(
+    primary: AppColors.primary,
+    onPrimary: AppColors.onPrimary,
+    primaryContainer: AppColors.primaryLight,
+    onPrimaryContainer: AppColors.textPrimary,
+    secondary: AppColors.secondary,
+    onSecondary: AppColors.textPrimary,
+    secondaryContainer: AppColors.secondaryLight,
+    onSecondaryContainer: AppColors.textPrimary,
+    error: AppColors.danger,
+    surface: AppColors.card,
+    onSurface: AppColors.textPrimary,
+  );
+
   static ThemeData get light {
     final base = ThemeData(
       useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.primary,
-        primary: AppColors.primary,
-      ),
+      colorScheme: _scheme,
       scaffoldBackgroundColor: AppColors.background,
     );
 
@@ -59,55 +82,75 @@ class AppTheme {
         centerTitle: true,
         titleTextStyle: TextStyle(
           color: AppColors.textPrimary,
-          fontSize: 18,
-          fontWeight: FontWeight.w600,
+          fontSize: AppFontSize.title,
+          fontWeight: AppFontWeight.medium,
         ),
         iconTheme: IconThemeData(color: AppColors.textPrimary),
+        // ⚠️ 必须显式声明：App 是浅色主题，状态栏文字/图标要用**深色**。
+        //
+        // 缺了它，系统沿用默认（深色主题下是浅色图标），
+        // 于是白字画在奶油白背景上 —— 时间、电量几乎看不见。
+        // 这个问题其实一直存在，只是以前登录页顶部是一大块橙色渐变，
+        // 白图标在橙底上正好可见，把它掩盖住了；
+        // 换成极简白底后就暴露出来了。
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark, // Android
+          statusBarBrightness: Brightness.light, // iOS
+          systemNavigationBarColor: AppColors.background,
+          systemNavigationBarIconBrightness: Brightness.dark,
+        ),
       ),
       cardTheme: CardThemeData(
         color: AppColors.card,
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(AppRadius.md),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFFF1F4F8),
+        fillColor: AppColors.surface,
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 16,
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.md,
         ),
         hintStyle: const TextStyle(color: AppColors.textHint),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
           borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
+          backgroundColor: AppColors.primaryDark,
+          foregroundColor: AppColors.onPrimary,
           minimumSize: const Size.fromHeight(52),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadius.sm),
           ),
-          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          // 按钮专属字号 17（AppFontSize.button）
+          textStyle: const TextStyle(
+            fontSize: AppFontSize.button,
+            fontWeight: AppFontWeight.bold,
+          ),
         ),
       ),
       chipTheme: base.chipTheme.copyWith(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+        ),
         side: BorderSide.none,
-        labelStyle: const TextStyle(fontWeight: FontWeight.w500),
+        labelStyle: const TextStyle(fontWeight: AppFontWeight.medium),
       ),
       dividerTheme: const DividerThemeData(
         color: AppColors.divider,
@@ -117,8 +160,10 @@ class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: AppColors.textPrimary,
-        contentTextStyle: const TextStyle(color: Colors.white),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        contentTextStyle: const TextStyle(color: AppColors.onPrimary),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+        ),
       ),
     );
   }

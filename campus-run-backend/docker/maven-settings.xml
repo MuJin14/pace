@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven 镜像配置（国内加速）。
+  
+  ⚠️ 为什么必须要有这个文件：
+  Docker 构建时 mvn 默认访问 repo.maven.apache.org，国内会超时，
+  表现为构建长时间卡在 `mvn dependency:go-offline` 不动。
+  
+  实测：repo.maven.apache.org 超时；maven.aliyun.com 可达。
+  （campus-run-app 前端用的 maven.aliyun.com 曾返回 404 是因为踩到了
+    错误的路径，Maven 仓库本身是好的，这里用的是 /repository/public。）
+  
+  放在 Dockerfile 里 COPY 到 /root/.m2/settings.xml 即可全局生效。
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+  <mirrors>
+    <!-- 阿里云公共仓库（含 central / jcenter 等） -->
+    <mirror>
+      <id>aliyun-public</id>
+      <name>Aliyun Public</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+      <mirrorOf>central</mirrorOf>
+    </mirror>
+  </mirrors>
+
+  <profiles>
+    <profile>
+      <id>aliyun-repos</id>
+      <repositories>
+        <repository>
+          <id>aliyun-central</id>
+          <url>https://maven.aliyun.com/repository/public</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+        <repository>
+          <id>aliyun-spring</id>
+          <url>https://maven.aliyun.com/repository/spring</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>aliyun-plugin</id>
+          <url>https://maven.aliyun.com/repository/public</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+
+  <activeProfiles>
+    <activeProfile>aliyun-repos</activeProfile>
+  </activeProfiles>
+
+  <!-- 超时调短，出问题能快速失败而不是长时间挂住 -->
+  <servers/>
+</settings>
