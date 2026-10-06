@@ -58,6 +58,25 @@ $sha = (Get-FileHash $apk.FullName -Algorithm SHA256).Hash
 Write-Host ("  sha256 {0}" -f $sha)
 
 # ---- build version.json locally (UTF-8 without BOM) ------------------------
+#
+# WARNING: the changelog must NOT be empty -- fail loudly instead of silently
+# writing an empty string.
+#
+# Why: version.json is replaced WHOLESALE. Omitting -Changelog therefore wipes
+# the changelog already on the server, and the app's "what's new" section goes
+# blank -- while this script still reports success. A textbook silent failure.
+# It happened 3 times (each needing a manual fix-up on the server), so now we
+# stop the release instead of shipping an empty changelog.
+#
+# NOTE: keep this file pure ASCII. Windows PowerShell 5.1 decodes a BOM-less
+# .ps1 as ANSI, so non-ASCII comments here break the parser. The changelog text
+# itself is passed on the command line, where UTF-8 is handled correctly.
+if ([string]::IsNullOrWhiteSpace($Changelog)) {
+    throw ('-Changelog must not be empty: version.json is replaced wholesale ' +
+           'and an empty value blanks out the changelog shown in the app. ' +
+           'Pass the release notes explicitly on the command line.')
+}
+
 $meta = [ordered]@{
     latest       = $Version
     minSupported = $MinSupported
