@@ -140,6 +140,72 @@ public final class TrackAnomalyDetector {
         return null;
     }
 
+    /**
+     * 决定这次运动该采用哪个时长。
+     *
+     * <h2>背景</h2>
+     *
+     * 原来只用 {@code endTime - startTime}。一次连续跑完没问题，但**续接场景会算错**：
+     * 客户端恢复本地草稿继续跑时，累计时长是一段段跑出来的，
+     * 而「结束 − 开始」把中间没在跑的空档也算了进去。
+     *
+     * 真实故障：上报时长 17.9 小时（实际只跑了十几分钟）→ 平均速度算成 0 →
+     * 命中 STATIONARY_DRIFT「疑似原地漂移」→ 整次成绩作废。
+     *
+     * <h2>规则</h2>
+     *
+     * 客户端上报了 {@code reportedSeconds}（它自己计时器上的数字，最贴近用户认知）
+     * 时优先采用，但**必须不超过轨迹覆盖的时间跨度** —— 时长不可能长于轨迹本身。
+     * 超出说明上报值不可信（客户端 bug 或伪造），退回时间戳相减。
+     *
+     * <p>这条约束同时让伪造没有收益：把时长报大只会拉低平均速度，
+     * 反而更容易被判成漂移。
+     *
+     * @param reportedSeconds 客户端上报的时长（秒）；null/非正数表示没报
+     * @param timelineSeconds 时间戳相减得到的时长（秒）
+     * @param spanSeconds     轨迹首末点的时间跨度（秒）；&lt;=0 表示无法判定
+     * @return 应当采用的时长（秒），保证 &gt; 0
+     */
+    public static long effectiveDurationSeconds(Integer reportedSeconds,
+                                               long timelineSeconds,
+                                               long spanSeconds) {
+        if (reportedSeconds == null || reportedSeconds <= 0) {
+            // 老版本客户端不传，或传了非法值：退回时间戳相减
+            return Math.max(timelineSeconds, 1);
+        }
+        // 无法用轨迹校验（点太少/没有时间戳）时以时间戳相减为准，
+        // 宁可短一点（配速偏高）也不能凭空接受一个未经校验的大值。
+        if (spanSeconds <= 0) {
+            return Math.max(timelineSeconds, 1);
+        }
+        if (reportedSeconds > spanSeconds) {
+            return Math.max(timelineSeconds, 1);
+        }
+        return Math.max(reportedSeconds, 1);
+    }
+
+    /** 轨迹首末点之间的时间跨度（秒）；无法判定时返回 0。 */
+    public static long trackSpanSeconds(List<TrackPoint> track) {
+        if (track == null || track.size() < 2) {
+            return 0;
+        }
+        Long first = null;
+        Long last = null;
+        for (TrackPoint p : track) {
+            if (p == null || p.getTimestamp() == null) {
+                continue;
+            }
+            if (first == null) {
+                first = p.getTimestamp();
+            }
+            last = p.getTimestamp();
+        }
+        if (first == null || last == null || last <= first) {
+            return 0;
+        }
+        return (last - first) / 1000L;
+    }
+
     /** 异常类型；{@link #message()} 会写入 activity.invalid_reason 供人工复核。 */
     public enum Anomaly {
         POINTS_TOO_FEW("轨迹点不足 2 个"),

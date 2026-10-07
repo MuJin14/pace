@@ -53,12 +53,22 @@ class ActivityRepository {
     required int endTime,
     required List<TrackPoint> track,
     double? calories,
+    /// 客户端计时器给出的**真实运动时长**（秒）。
+    ///
+    /// 为什么不能只靠 startTime/endTime：续接本地草稿继续跑时，
+    /// 计时是累计的（一段段跑出来的），而「结束 − 开始」包含中间没在跑的空档。
+    /// 服务端据此算出的时长会远大于真实运动时间 → 平均速度趋近 0
+    /// → 被判「疑似原地漂移」→ 成绩作废。
+    ///
+    /// 服务端会校验它不超过轨迹的时间跨度，所以照实报即可。
+    int? durationSeconds,
   }) async {
     try {
       final resp = await _dio.post('/api/v1/activity', data: {
         'type': type,
         'startTime': startTime,
         'endTime': endTime,
+        if (durationSeconds != null) 'durationSeconds': durationSeconds,
         if (calories != null) 'calories': calories,
         'track': track.map((p) => p.toJson()).toList(),
       });

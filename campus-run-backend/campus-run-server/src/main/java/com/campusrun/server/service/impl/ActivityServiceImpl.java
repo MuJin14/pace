@@ -104,6 +104,25 @@ public class ActivityServiceImpl implements ActivityService {
         }
 
         long durationSeconds = (request.getEndTime() - effectiveStartMs) / 1000;
+
+        // ⚠️ 时长优先采用客户端计时器上报的值（若有），并用轨迹跨度做上限校验。
+        //
+        // 为什么不能只用「结束 − 开始」：客户端续接本地草稿继续跑时，
+        // 累计时长是一段段跑出来的，而时间戳相减会把中间没在跑的空档也算进去。
+        // 真实故障：上报时长 17.9 小时（实际跑了十几分钟）→ 平均速度算成 0
+        // → 命中「疑似原地漂移」→ 整次成绩作废。
+        // 判定规则与约束见 TrackAnomalyDetector.effectiveDurationSeconds。
+        long spanSeconds = TrackAnomalyDetector.trackSpanSeconds(track);
+        long rawDurationSeconds = durationSeconds;
+        durationSeconds = TrackAnomalyDetector.effectiveDurationSeconds(
+                request.getDurationSeconds(), durationSeconds, spanSeconds);
+        if (durationSeconds != rawDurationSeconds) {
+            log.info("时长按客户端上报值校正：userId={}, 时间戳相减={}s, "
+                            + "客户端上报={}s, 轨迹跨度={}s, 采用={}s",
+                    userId, rawDurationSeconds, request.getDurationSeconds(),
+                    spanSeconds, durationSeconds);
+        }
+
         double avgSpeedKmh = (distance / 1000.0) / (durationSeconds / 3600.0);
 
         int mode = request.getMode() == null ? 1 : request.getMode();

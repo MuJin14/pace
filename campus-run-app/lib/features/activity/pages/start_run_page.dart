@@ -76,6 +76,13 @@ class _StartRunPageState extends ConsumerState<StartRunPage>
   /// 开始时间（第一个有效定位点的时间），上报时用它而不是推算。
   DateTime? _startedAt;
 
+  /// 是否已经通过「快速首点」显示过位置。
+  ///
+  /// 只影响界面（把「正在获取定位…」换掉、让地图有东西可看），
+  /// 与轨迹、成绩无关 —— 快速首点可能是缓存的旧位置或低精度解，
+  /// **绝不能**进轨迹。
+  bool _hasShownPosition = false;
+
   /// 草稿落盘节流：每个点都写盘会有性能问题，2 秒一次足够。
   DateTime _lastDraftSave = DateTime.fromMillisecondsSinceEpoch(0);
   bool _draftChecked = false;
@@ -137,6 +144,12 @@ class _StartRunPageState extends ConsumerState<StartRunPage>
     _startTracking();
   }
 
+  /// 草稿的有效期，见 [RunDraft.maxAge] 的说明。
+  ///
+  /// 直接用类上的常量而不是在这里再写一个 —— 两处各写一份必然会漂移，
+  /// 而这类「阈值不一致」的问题只会在某天莫名丢数据时才暴露。
+  static const Duration _draftMaxAge = RunDraft.maxAge;
+
   /// 读取本地草稿。有则恢复轨迹与用时，让用户接着跑（或直接结束上传）。
   Future<void> _restoreDraftIfAny() async {
     if (_draftChecked) return;
@@ -146,6 +159,21 @@ class _StartRunPageState extends ConsumerState<StartRunPage>
       if (draft == null || draft.isEmpty || !mounted) return;
       // 只恢复同一运动类型的草稿，避免跑步页捡到骑行记录
       if (draft.type != _typeCode) return;
+
+      // ⚠️ 过期草稿直接丢弃 —— 见 _draftMaxAge 的说明。
+      //
+      // 宁可让用户少一次「接着跑」的机会，也不能把昨天的轨迹并进今天，
+      // 那会直接毁掉这次成绩（真实发生过，且不止一次）。
+      final age = draft.ageAt(DateTime.now().millisecondsSinceEpoch);
+      if (age != null && age > _draftMaxAge) {
+        debugPrint('[跑步] 丢弃过期草稿（存放 ${age.inHours} 小时，'
+            '超过 ${_draftMaxAge.inHours} 小时上限）');
+        await ref.read(runDraftStorageProvider).clear();
+        if (mounted) {
+          _showMessage('上次未完成的运动已超过 ${_draftMaxAge.inHours} 小时，已清除');
+        }
+        return;
+      }
 
       final restored = <TrackPoint>[];
       for (final p in draft.points) {
@@ -159,7 +187,19 @@ class _StartRunPageState extends ConsumerState<StartRunPage>
           ..clear()
           ..addAll(restored);
         _elapsed = Duration(milliseconds: draft.elapsedMs);
-        _startedAt = DateTime.fromMillisecondsSinceEpoch(draft.startedAtMs);
+        // ⚠️ 不能沿用草稿里的 startedAt（那是上次运动的时间）。
+        //
+        // 上报的 startTime 必须是**这条轨迹真正开始**的时刻，也就是第一个
+        // 轨迹点的时间。用旧值会让服务端的「开始时间 vs 首个轨迹点」对不上。
+        //
+        // 而「用户实际跑了多久」由 elapsedMs 单独承载 —— 它会随上传一起
+        // 作为 durationSeconds 发给服务端（见 _submit），所以续接场景下
+        // 时长依然准确，不需要靠两个时间戳相减去凑。
+        final firstPointTs = restored.first.timestamp;
+        _startedAt = firstPointTs > 0
+            ? DateTime.fromMillisecondsSinceEpoch(firstPointTs)
+            : null;
+        _hasShownPosition = true; // 已有轨迹，不再显示"正在获取定位"
         // 距离按恢复的轨迹重算，避免与已存值不一致。
         // 注意必须**重建累加器**，否则它还是空的，后续新增点的累计值会从 0 开始。
         _resetDistanceAccumulator();
@@ -176,7 +216,6 @@ class _StartRunPageState extends ConsumerState<StartRunPage>
       // 草稿不可用不影响开新的一次运动
     }
   }
-
 
   /// 把当前轨迹写入本地草稿（节流 2 秒）。
   void _saveDraft({bool force = false}) {
@@ -342,6 +381,64 @@ class _StartRunPageState extends ConsumerState<StartRunPage>
       },
       cancelOnError: false,
     );
+
+    // 「快速首点」：与位置流**并行**发起，谁先出结果算谁的。
+    //
+    // 为什么需要（用户反馈「开始跑步定位时间有点久」）：
+    // `getPositionStream` 在拿到一个**满足精度要求**的定位之前一帧都不发，
+    // 冷启动搜星于是要等几秒到几十秒。而一次性定位请求往往更快返回
+    // —— 系统会先给一个可用的解，精度随后再收敛。
+    //
+    // 这里用「近似精度」而不是高精度：目的是**快点有个点**把界面点亮，
+    // 精度不够的点不会被记进轨迹（见 _onPosition 的精度过滤），
+    // 所以不会污染成绩。
+    _probeFirstFixQuickly();
+  }
+
+  /// 并行发起「上次已知位置」与「一次性快速定位」，先到先用。
+  ///
+  /// 只用于**界面反馈**（把「正在获取定位…」换掉、让地图有东西可看），
+  /// 不参与轨迹与成绩 —— 所以对精度要求可以放宽。
+  Future<void> _probeFirstFixQuickly() async {
+    // ① 上次已知位置：几乎瞬时返回，哪怕它是几十秒前的。
+    unawaited(Geolocator.getLastKnownPosition().then((p) {
+      if (p != null) _onDisplayPosition(p);
+    }).catchError((Object e) {
+      debugPrint('[定位] 取上次已知位置失败（忽略）: $e');
+    }));
+
+    // ② 一次性定位：比位置流更快出首个解。
+    //
+    // geolocator 的文档也正是这么推荐的：
+    // 「先用 getLastKnownPosition 拿缓存位置，再用 getCurrentPosition 的结果更新」。
+    //
+    // forceAndroidLocationManager 必须为 true：国内 ROM（小米/华为）上
+    // 走 GMS 的 FusedLocationProvider 常直接失败（见 _locationSettings 的说明）。
+    try {
+      final p = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+        forceAndroidLocationManager: true,
+        timeLimit: const Duration(seconds: 20),
+      );
+      _onDisplayPosition(p);
+    } catch (e) {
+      // 失败不影响主链路：位置流仍然在跑，它一定会给出结果或触发超时兜底。
+      debugPrint('[定位] 快速首点失败（继续等位置流）: $e');
+    }
+  }
+
+  /// 只更新界面用的定位（不写入轨迹、不计距离）。
+  ///
+  /// 与 [_onPosition] 的区别：这里拿到的东西可能精度很差、也可能是缓存的旧位置，
+  /// 所以**绝不入轨迹**。它唯一的作用是让用户立刻看到「定位到了」。
+  void _onDisplayPosition(Position p) {
+    if (!mounted || _hasShownPosition || _paused) return;
+    _hasShownPosition = true;
+    setState(() {});
+    if (_mapReady) {
+      final gcj = CoordTransform.wgs84ToGcj02(p.latitude, p.longitude);
+      _mapController.move(gcj, _mapController.camera.zoom);
+    }
   }
 
   /// 定位采样参数。
@@ -395,6 +492,9 @@ class _StartRunPageState extends ConsumerState<StartRunPage>
     // 不能像以前那样直接 `_phase != ready 就 return` —— 那样首个点会被丢掉，
     // 导致界面永远等不到「可以开始」的信号。
     if (_phase != _Phase.ready && _phase != _Phase.checking) return;
+
+    // 界面已经用快速首点显示过了：这里就不再触发「重新定位」的视觉跳变。
+    _hasShownPosition = true;
 
     final ts = p.timestamp.millisecondsSinceEpoch;
     // 精度过滤 + 抖动过滤统一走 TrackSampler（规则可单测，且与服务端同判据）。
@@ -533,11 +633,23 @@ class _StartRunPageState extends ConsumerState<StartRunPage>
     final endTime = DateTime.now().millisecondsSinceEpoch;
     final startTime = _startedAt?.millisecondsSinceEpoch ?? _track.first.timestamp;
 
+    // ⚠️ 同时上报**真实的运动时长**（用户看到的那个计时）。
+    //
+    // 为什么必须一起报：续接本地草稿继续跑时，计时是累计的（一段段跑出来的），
+    // 而「结束 − 开始」会把中间没在跑的空档也算进去。
+    // 结果是服务端算出的时长远大于真实运动时间 → 平均速度被算成 0
+    // → 命中「疑似原地漂移」→ 整次成绩作废。
+    //
+    // 服务端会校验它不超过轨迹的时间跨度（时长不可能长于轨迹本身），
+    // 所以这里照实报即可，不需要自己裁剪。
+    final elapsedSeconds = _elapsed.inSeconds;
+
     try {
       final activityId = await ref.read(activityRepositoryProvider).create(
             type: _typeCode,
             startTime: startTime,
             endTime: endTime,
+            durationSeconds: elapsedSeconds,
             track: _track,
           );
       // 上传成功才清草稿：清早了会丢数据，清晚了下次会重复恢复
@@ -628,14 +740,19 @@ class _StartRunPageState extends ConsumerState<StartRunPage>
                 children: [
                   const CircularProgressIndicator(),
                   const SizedBox(height: AppSpacing.lg),
-                  // GPS 冷启动搜星可能要几十秒，必须让用户知道在做什么，
-                  // 否则会被当成"卡死"反复退出重进 —— 那反而让定位更慢。
-                  Text('正在获取定位…',
+                  Text(
+                      // 已经有（缓存的/低精度的）位置了：明确说"正在提高精度"，
+                      // 而不是笼统的"正在获取"—— 前者让用户知道**已经定位到了**，
+                      // 只是还在收敛，愿意多等一会。
+                      _hasShownPosition ? '已定位，正在提高精度…' : '正在获取定位…',
                       style: TextStyle(
                           color: AppColors.textSecondary,
                           fontSize: AppFontSize.body)),
                   const SizedBox(height: AppSpacing.sm),
-                  Text('首次定位可能需 30 秒左右，建议在室外或窗边',
+                  Text(
+                      _hasShownPosition
+                          ? '现在就可以开始跑，起点会取第一个精确定位点'
+                          : '首次定位可能需 30 秒左右，建议在室外或窗边',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                           color: AppColors.textHint,

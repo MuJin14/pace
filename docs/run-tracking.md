@@ -271,3 +271,67 @@ long durationSeconds = (request.getEndTime() - request.getStartTime()) / 1000;
 | 阈值边界：刚好等于阈值保留、超一秒即替换 |
 | 上报时间晚于首点时被夹到首点（防配速虚高） |
 | 空轨迹 / 无时间戳的点 / null 元素都不崩，且原样返回 |
+
+
+### 定位提速与草稿过期（2.3.0）
+
+#### 一、定位慢：为什么「点了开始跑步要等很久」
+
+`getPositionStream` 在拿到一个**满足精度要求**的定位之前一帧都不发。
+而页面原先的 `_Phase.checking` 只由 `_onPosition` 里的首个合格点切到 `ready`，
+于是冷启动搜星的全部时间都变成了用户的干等（几秒到几十秒）。
+
+**改法：并行拿首点，先到先用。**
+
+| 手段 | 作用 | 精度 |
+|---|---|---|
+| `getLastKnownPosition()` | 几乎瞬时返回缓存位置 | 可能很旧/很粗 |
+| `getCurrentPosition(desiredAccuracy: medium)` | 一次性定位，比等流更快出解 | 中等 |
+| `getPositionStream`（原路径） | 持续高精度采样 | 高 |
+
+前两者只走 `_onDisplayPosition()`：**只更新界面，绝不入轨迹**。
+轨迹与成绩仍然只由位置流给出的合格点构成 —— 这样即使缓存位置很旧，
+也不会污染距离。
+
+> geolocator 的文档也正是这么建议的：
+> 「先用 getLastKnownPosition 拿缓存位置，再用 getCurrentPosition 的结果更新」。
+
+`getCurrentPosition` 上必须带 `forceAndroidLocationManager: true`：
+国内 ROM 走 GMS 的 FusedLocationProvider 常直接失败，与 `_locationSettings()` 同因。
+
+**等待界面的措辞也跟着变了**：已有位置时显示「已定位，正在提高精度…」
+而不是笼统的「正在获取定位…」—— 用户知道已经定位到了，就更愿意多等一会。
+
+⚠️ **没有做「不等定位就直接开跑」**：那会让轨迹起点与计时起点错开，
+把刚修好的时长问题又弄坏。慢的是「拿到第一个点」，不是「开始记录」。
+
+#### 二、草稿过期：一次正常跑步被判无效的根因
+
+见上文「开始时间被定位到昨天」一节。本版做了三件事：
+
+1. **草稿过期**：`RunDraft.maxAge = 6 小时`，超时直接丢弃并提示。
+   `RunDraft.ageAt(nowMillis)` / `isExpiredAt(nowMillis)` 把判据提成可测方法
+   （注入 `now` 而不是内部取 `DateTime.now()`，否则测试只能构造
+   「刚好 6 小时零 1 毫秒前」的时间戳，既脆弱又会随执行时间漂移）。
+   时钟被改到过去（负年龄）时按**不过期**处理 —— 宁可保留，也不要误删用户数据。
+
+2. **恢复时不再沿用草稿的 `startedAt`**，改为取**第一个轨迹点的时间**。
+   上报的 startTime 必须是这条轨迹真正开始的时刻。
+
+3. **上报真实运动时长**：`ActivityCreateRequest.durationSeconds`（可选字段）。
+   续接场景下计时是累计的（一段段跑出来的），而「结束 − 开始」包含空档 ——
+   客户端手里就有准确值，直接报给服务端，不必反推。
+
+   服务端 `TrackAnomalyDetector.effectiveDurationSeconds` 的规则：
+     · 有上报值且 ≤ 轨迹时间跨度 → 采用上报值；
+     · 超过轨迹跨度 → 不可信，退回时间戳相减；
+     · 没报（老版本）或非法 → 退回时间戳相减。
+   「不超过轨迹跨度」这条约束同时让伪造没有收益：报大时长只会拉低平均速度，
+   反而更容易被判成漂移。
+
+#### 测试
+
+| 文件 | 守住什么 |
+|---|---|
+| `EffectiveDurationTest`（10 条） | 上报时长优先、超跨度被拒、缺失时退路、结果恒正、轨迹跨度的退化输入 |
+| `run_draft_expiry_test.dart`（11 条） | 6 小时边界、昨天草稿必过期、0/负年龄不过期、序列化往返不丢开始时间 |
