@@ -2,7 +2,7 @@
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File campus-run-backend\release-apk.ps1 `
-#       -Password 'xxx' -Version '1.2.0' -Changelog '1. 修复…'
+#       -Password 'xxx' -Version '1.2.0' -Changelog '1. fix ...'
 #
 # Source APK defaults to ..\campus-run.apk (the file you hand to testers).
 #
@@ -123,7 +123,7 @@ try {
     Invoke-Remote 'mkdir -p /home/ubuntu/campus-run-backend/apk' | Out-Null
 
     Write-Host '  uploading APK (54 MB, takes a minute or two over this link)...'
-    # ⚠️ Set-SCPItem's -Destination is a DIRECTORY, not a file path: passing
+    # Set-SCPItem's -Destination is a DIRECTORY, not a file path: passing
     # "dir/file" yields `scp: .../file: Not a directory`.
     # So upload into a staging dir and move into place afterwards -- which also
     # makes the swap atomic, so a download that starts mid-upload can never get
@@ -151,6 +151,33 @@ rmdir staging 2>/dev/null || true
 # A 600 file would be unreadable -> the app reports 404 on download.
 chmod 755 .
 chmod 644 campus-run.apk version.json
+
+# ---- also refresh the WEBSITE's copy of version.json -----------------------
+#
+# WARNING: there are TWO version.json on this server and they are served by
+# different hosts:
+#   apk/version.json      -> the App's API (read by the server on every request)
+#   site/version.json     -> the website, which fetches it at runtime from
+#                            https://dl.hibiscus.wiki:8443/version.json
+#                            to refresh the version badge on the page
+#
+# deploy-site.ps1 regenerates the site copy, but a release does NOT run that
+# script -- so after a release the website kept showing the PREVIOUS version
+# (observed: API said 2.3.0 while the site badge still said 2.2.2, because
+# release 2.3.0 never touched site/version.json).
+#
+# Copying it here keeps the two in sync without requiring a site deploy.
+# `cp` inside one filesystem is not atomic, so write to a temp then mv.
+if [ -d ../site ]; then
+  cp -f version.json ../site/version.json.tmp
+  mv -f ../site/version.json.tmp ../site/version.json
+  chmod 644 ../site/version.json
+  echo "site/version.json updated:"
+  head -c 120 ../site/version.json
+  echo
+else
+  echo "WARN: ../site not found - the website will keep its old version badge"
+fi
 ls -la
 "@
     if ($r1.Exit -ne 0) { throw "install step failed (exit $($r1.Exit))" }
