@@ -59,6 +59,87 @@ public final class TrackAnomalyDetector {
     /** 允许的客户端时钟超前量（秒）：服务器时间 + 该值之后视为伪造未来时间。 */
     private static final long MAX_CLOCK_SKEW_SECONDS = 120L;
 
+    /**
+     * 允许「上报的开始时间」早于「第一个轨迹点」的最大间隔（秒）。
+     *
+     * <p>超过这个间隔就认为上报的开始时间是**陈旧的**，改用第一个轨迹点的时间。
+     *
+     * <h2>为什么需要这条（真实故障：一次正常跑步被判无效）</h2>
+     *
+     * 用户反馈：「跑了一下，原本是合格的时间，结果开始时间给我定位到昨天了，
+     * 导致成绩无效」。
+     *
+     * 链路是这样的：
+     * <ol>
+     *   <li>上一次运动没跑完/没上传成功，本地留下草稿（含当时的 startedAt）；</li>
+     *   <li>今天再开跑，草稿被恢复，`_startedAt` 被赋成**昨天**那个值；</li>
+     *   <li>本次的轨迹点时间戳却是**今天**的；</li>
+     *   <li>服务端按 {@code duration = endTime - startTime} 算时长 → 约 86400 秒；</li>
+     *   <li>平均速度 = 距离 / 24 小时 ≈ 0 → 命中 STATIONARY_DRIFT
+     *       「疑似原地漂移」→ **整次成绩无效**。</li>
+     * </ol>
+     *
+     * <p>关键在于：轨迹点的时间戳是**这次真实采集**的，比客户端上报的
+     * 开始时间可信得多。所以当两者差得离谱时，信轨迹。
+     *
+     * <p>取 10 分钟：正常情况下的间隔只有「冷启动搜星」那几秒到几十秒；
+     * 10 分钟既不会误伤（真在操场上等了十分钟才开始记轨迹也说得过去），
+     * 又远小于「跨天」这种量级。
+     */
+    public static final long MAX_START_TIME_GAP_SECONDS = 600L;
+
+    /**
+     * 修正客户端上报的开始时间。
+     *
+     * <p>返回**应当采用的**开始时间（毫秒）。规则：
+     * <ul>
+     *   <li>轨迹里拿不到时间 → 原样返回（无从校正）；</li>
+     *   <li>上报时间**晚于**第一个点 → 也采用第一个点（开始时间不能晚于第一次记录，
+     *       否则时长会被压缩，配速虚高）；</li>
+     *   <li>上报时间早于第一个点、但间隔在 {@link #MAX_START_TIME_GAP_SECONDS} 内
+     *       → 保留上报值（那几秒是真实的「点开 App → 等到定位」的间隔，
+     *       用户认可这段时间）；</li>
+     *   <li>早得超过阈值 → 判为陈旧值（草稿恢复导致），改用第一个点的时间。</li>
+     * </ul>
+     *
+     * <p>做成静态纯函数是为了能直接单测 —— 这个判定只看代码不容易发现错，
+     * 而它一旦出错就是「用户的成绩被静默作废」或「时长虚高」，两者都很难排查。
+     *
+     * @param track            轨迹点（按时间升序，可为空）
+     * @param reportedStartMs  客户端上报的开始时间（毫秒）
+     * @return 应当采用的开始时间（毫秒）
+     */
+    public static long effectiveStartTimeMillis(List<TrackPoint> track,
+                                                long reportedStartMs) {
+        Long firstPointMs = firstPointTimestamp(track);
+        if (firstPointMs == null) {
+            return reportedStartMs;
+        }
+        long gapMillis = firstPointMs - reportedStartMs;
+        // 上报时间晚于第一个点：以第一个点为准（时长不能被压缩）
+        if (gapMillis < 0) {
+            return firstPointMs;
+        }
+        long gapSeconds = gapMillis / 1000L;
+        if (gapSeconds > MAX_START_TIME_GAP_SECONDS) {
+            return firstPointMs;
+        }
+        return reportedStartMs;
+    }
+
+    /** 轨迹里第一个带时间戳的点的时间；没有则返回 null。 */
+    private static Long firstPointTimestamp(List<TrackPoint> track) {
+        if (track == null) {
+            return null;
+        }
+        for (TrackPoint p : track) {
+            if (p != null && p.getTimestamp() != null) {
+                return p.getTimestamp();
+            }
+        }
+        return null;
+    }
+
     /** 异常类型；{@link #message()} 会写入 activity.invalid_reason 供人工复核。 */
     public enum Anomaly {
         POINTS_TOO_FEW("轨迹点不足 2 个"),

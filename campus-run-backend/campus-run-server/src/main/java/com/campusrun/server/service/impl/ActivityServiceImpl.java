@@ -85,7 +85,25 @@ public class ActivityServiceImpl implements ActivityService {
                     Math.round(rawDistance), Math.round(distance), track.size());
         }
 
-        long durationSeconds = (request.getEndTime() - request.getStartTime()) / 1000;
+        // ⚠️⚠️ 先用「第一个轨迹点」校正上报的开始时间，**再**算时长。
+        //
+        // 真实故障：用户一次正常跑步被判无效 —— 「开始时间给我定位到昨天了」。
+        // 原因是客户端恢复了上一次没上传完的本地草稿，把 startedAt 带成了昨天，
+        // 而轨迹点的时间戳是今天的。于是 duration = endTime - startTime ≈ 24 小时，
+        // 平均速度趋近 0，命中 STATIONARY_DRIFT「疑似原地漂移」，成绩作废。
+        //
+        // 轨迹点的时间戳是这次真实采集的，比客户端上报的开始时间可信；
+        // 两者差得离谱时以轨迹为准。判定与阈值见 TrackAnomalyDetector。
+        long effectiveStartMs = TrackAnomalyDetector.effectiveStartTimeMillis(
+                track, request.getStartTime());
+        if (effectiveStartMs != request.getStartTime()) {
+            log.warn("上报的开始时间与轨迹首点差距过大，已按轨迹首点校正："
+                            + "userId={}, reported={}, firstPoint={}, 相差={}秒",
+                    userId, request.getStartTime(), effectiveStartMs,
+                    Math.abs(effectiveStartMs - request.getStartTime()) / 1000);
+        }
+
+        long durationSeconds = (request.getEndTime() - effectiveStartMs) / 1000;
         double avgSpeedKmh = (distance / 1000.0) / (durationSeconds / 3600.0);
 
         int mode = request.getMode() == null ? 1 : request.getMode();
@@ -103,7 +121,9 @@ public class ActivityServiceImpl implements ActivityService {
         activity.setCalories(request.getCalories() == null
                 ? null
                 : BigDecimal.valueOf(request.getCalories()).setScale(2, RoundingMode.HALF_UP));
-        activity.setStartTime(toLocalDateTime(request.getStartTime()));
+        // 存校正后的值：榜单/目标/勋章都按 startTime 归属日期，
+        // 存陈旧值会让这次运动被算到「昨天」那一栏去。
+        activity.setStartTime(toLocalDateTime(effectiveStartMs));
         activity.setEndTime(toLocalDateTime(request.getEndTime()));
 
         TrackPoint first = track.get(0);
@@ -123,7 +143,7 @@ public class ActivityServiceImpl implements ActivityService {
                 request.getType(),
                 distance,
                 durationSeconds,
-                request.getStartTime(),
+                effectiveStartMs,
                 System.currentTimeMillis());
         if (anomaly != null) {
             activity.setInvalid(1);
@@ -223,7 +243,6 @@ public class ActivityServiceImpl implements ActivityService {
         if (request.getEndTime() <= request.getStartTime()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "结束时间必须晚于开始时间");
         }
-
         List<TrackPointRequest> track = request.getTrack();
         if (track == null || track.size() < 2) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "轨迹点数量不足");
@@ -231,6 +250,29 @@ public class ActivityServiceImpl implements ActivityService {
         int maxPoints = request.getType() == 2 ? MAX_CYCLING_POINTS : MAX_RUNNING_POINTS;
         if (track.size() > maxPoints) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "轨迹点数量超过上限");
+        }
+
+        // ⚠️ 结束时间必须晚于**第一个轨迹点**，而不是晚于「上报的开始时间」。
+        //
+        // 上报的开始时间可能是客户端恢复了本地草稿带过来的陈旧值
+        // （用户反馈过「开始时间被定位到昨天」）。如果拿它做门槛，
+        // 就会出现两种误伤：
+        //   · 草稿时间在未来 → endTime 明明正常，却被判「结束时间必须晚于开始时间」，
+        //     而且文案完全指不到真正的问题；
+        //   · 真正的判据其实是「得有一段正的真实轨迹」。
+        //
+        // 用轨迹首点做判据既准确又不会被陈旧值带偏 —— 轨迹点的时间戳
+        // 是这次真实采集的。开始时间本身则由 effectiveStartTimeMillis 校正。
+        Long firstPointMs = null;
+        for (TrackPointRequest p : track) {
+            if (p.getTimestamp() != null) {
+                firstPointMs = p.getTimestamp();
+                break;
+            }
+        }
+        if (firstPointMs != null && request.getEndTime() <= firstPointMs) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "结束时间必须晚于第一个轨迹点的时间");
         }
 
         for (TrackPointRequest p : track) {
