@@ -1,0 +1,140 @@
+name: Build iOS
+
+# 为什么需要这个 workflow
+# ------------------------
+# iOS 的构建**必须在 macOS 上做**，Windows 无法交叉编译。
+# 你本机是 Windows，所以这里借用 GitHub 的免费 macOS runner ——
+# 这样就完全不需要买 Mac。
+#
+# ⚠️ 产物是**未签名**的 IPA。这一点很重要，见下面的说明。
+#
+# 未签名 IPA 能不能装？
+#   · 能，但需要用户自己用工具签名（Windows 上可用 Sideloadly / AltStore，
+#     用免费 Apple ID 即可），装完 **7 天到期**，要重新签一次；
+#   · 想长期使用 / 分发给别人 → 必须 Apple 开发者账号（$99/年）。
+#     这一步**跟有没有 Mac 无关**，是 Apple 从系统层面加的锁。
+#
+# 所以这个 workflow 解决的是「编译」问题，不解决「签名/安装」问题。
+
+on:
+  # 手动触发（在 Actions 页面点 Run workflow）
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: '后端地址（正式用默认值）'
+        required: false
+        default: 'https://api.hibiscus.wiki:8443'
+        type: string
+  # 打 tag 时自动构建，并把 IPA 发到 Release
+  push:
+    tags:
+      - 'ios-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-ios:
+    # macos-14 = Apple Silicon。用最新的能避开 Intel runner 被淘汰的问题。
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Flutter 版本必须和本地一致，否则 dart 的 lint / API 可能有差异。
+      # 本地是 3.29.3，这里锁死同一个版本。
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      # --no-pub 不用：CI 上需要正常拉依赖。
+      - name: flutter pub get
+        working-directory: campus-run-app
+        run: flutter pub get
+
+      # 静态检查先跑一遍：CI 上编译一次要几分钟，
+      # 让明显的错误尽早失败，比等到 Xcode 报错再回头查省时间。
+      - name: Analyze
+        working-directory: campus-run-app
+        run: flutter analyze lib
+
+      - name: Run tests
+        working-directory: campus-run-app
+        run: flutter test --no-pub
+
+      - name: Pod install
+        working-directory: campus-run-app/ios
+        run: pod install --repo-update
+
+      # --no-codesign 是这里的关键：CI 上没有你的签名证书，
+      # 必须跳过签名才能构建成功。产出的是未签名的 .app / .ipa。
+      - name: Build iOS (no codesign)
+        working-directory: campus-run-app
+        env:
+          API_BASE_URL: ${{ inputs.api_base_url || 'https://api.hibiscus.wiki:8443' }}
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define=API_BASE_URL="$API_BASE_URL"
+
+      # 把 .app 打包成 IPA。
+      # 注意 .app 的路径是 build/ios/iphoneos/Runner.app —— 用 iphoneos 而不是
+      # iphonesimulator，模拟器版本是不能装到真机上的。
+      - name: Package IPA
+        working-directory: campus-run-app
+        run: |
+          set -e
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::Build output not found at $APP_PATH"
+            ls -la build/ios/ 2>/dev/null || true
+            exit 1
+          fi
+          rm -rf build/ios/ipa_payload
+          mkdir -p build/ios/ipa_payload/Payload
+          cp -R "$APP_PATH" build/ios/ipa_payload/Payload/
+          cd build/ios/ipa_payload
+          zip -qry ../campus-run-unsigned.ipa Payload
+          cd ..
+          ls -lh campus-run-unsigned.ipa
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: campus-run-ios-unsigned
+          path: campus-run-app/build/ios/campus-run-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      # 打了 tag 的话就同时发一个 Release，方便直接下载。
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/ios-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: campus-run-app/build/ios/campus-run-unsigned.ipa
+          name: '行迹 iOS ${{ github.ref_name }}'
+          body: |
+            ## 行迹 iOS 版（未签名 IPA）
+
+            ⚠️ **这是未签名的包，不能直接双击安装。** 需要自己签名：
+
+            | 方式 | 费用 | 有效期 |
+            |---|---|---|
+            | Sideloadly / AltStore + 免费 Apple ID | 0 | **7 天**（到期重签） |
+            | Apple 开发者账号（$99/年） | $99/年 | 1 年 |
+
+            签名工具在 Windows 上就能用，**不需要 Mac**。
+
+            安装步骤：
+            1. 下载本页的 `.ipa`
+            2. 用 Sideloadly 打开，填入你的 Apple ID
+            3. 手机上「设置 → 通用 → VPN与设备管理」信任该证书
+            4. 打开 App
+
+            > 7 天是 Apple 对免费签名账号的硬限制，与本 App 无关。
