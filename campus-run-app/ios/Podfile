@@ -1,0 +1,86 @@
+# iOS 依赖管理（CocoaPods）。
+#
+# ⚠️ 原先这个文件**不存在** —— iOS 工程是 `flutter create` 生成的骨架，
+# 但缺了 Podfile。Flutter 的 iOS 插件（geolocator、flutter_local_notifications、
+# flutter_secure_storage、shared_preferences 等 12 个）都靠 CocoaPods 集成，
+# 没有它就**必然构建失败**，而且报错通常指向「找不到模块」而非「缺 Podfile」，
+# 很容易被误判成插件不兼容。
+#
+# 这是标准的 Flutter Podfile，不要随意改动结构：
+# 上面几行是 flutter_tools 注入构建配置用的，删了会因为读不到
+# Generated.xcconfig（FLUTTER_ROOT、FLUTTER_APPLICATION_PATH 等）而失败。
+#
+# 部署目标必须 ≥ 13.0：flutter_local_notifications 19.x 与
+# geolocator 12.x 的最低要求都在 13.0，设低了会在 pod install 阶段报
+# 「The platform of the target `Runner` is not compatible」。
+
+platform :ios, '13.0'
+
+# CocoaPods 的全局分析统计，关掉（避免每次构建都要联网上报，拖慢 CI）。
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+# 这两行由 flutter_tools 生成，缺了会读不到 Flutter 的构建配置。
+flutter_ios_podfile_setup
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(
+    File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. " \
+          "If you're running pod install manually, make sure " \
+          "flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. " \
+        "Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(
+  File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+target 'Runner' do
+  use_frameworks!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+
+    target.build_configurations.each do |config|
+      # Pod 的部署目标不得低于工程本身，否则 Xcode 会警告甚至报错。
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+
+      # 权限相关的宏：Flutter 插件默认全部关闭，必须显式打开，
+      # 否则运行时权限回调永远不会触发（表现为「点了授权没反应」）。
+      #
+      # 逐个说明为什么需要：
+      #   PERMISSION_LOCATION*  -> geolocator 定位（跑步轨迹的核心）
+      #   PERMISSION_NOTIFICATIONS -> flutter_local_notifications
+      #   PERMISSION_PHOTOS     -> image_picker（聊天发图）
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
+        '$(inherited)',
+        'PERMISSION_LOCATION=1',
+        'PERMISSION_LOCATION_WHENINUSE=1',
+        'PERMISSION_LOCATION_ALWAYS=1',
+        'PERMISSION_NOTIFICATIONS=1',
+        'PERMISSION_PHOTOS=1',
+      ]
+    end
+  end
+end
