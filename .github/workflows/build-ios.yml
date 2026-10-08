@@ -65,9 +65,22 @@ jobs:
         working-directory: campus-run-app
         run: flutter analyze lib
 
+      # ⚠️ visual_qa_test.dart 必须排除。
+      #
+      # 它不是单元测试，而是**截图评估脚本**（`_shoot()` 生成 PNG 供人工看视觉质量），
+      # 本地跑测试时本来就不算它。CI 上第一次跑就因为它失败了 30 个：
+      # 无头 runner 里没有窗口/字体渲染环境，截图直接抛异常。
+      #
+      # 教训：CI 的测试范围应当与本地一致，否则会引入一堆「本地全绿、CI 全红」
+      # 的假失败 —— 而假失败最危险的地方是让人开始无视 CI 的红灯。
       - name: Run tests
         working-directory: campus-run-app
-        run: flutter test --no-pub
+        run: |
+          files=$(find test -name '*_test.dart' \
+            ! -name 'visual_qa_test.dart' ! -name 'qa_contrast_check.dart' \
+            | sort | tr '\n' ' ')
+          echo "Running: $files"
+          flutter test --no-pub $files
 
       - name: Pod install
         working-directory: campus-run-app/ios
